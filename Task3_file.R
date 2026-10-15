@@ -6,10 +6,16 @@ library(tidyverse)
 
 glimpse(assignment_data)
 
-Universal_budget<- assignment_data |> 
-  filter(primary_company == "Universal Pictures") |>
-  select(title, id, status, primary_genre, budget) |>
-  mutate(budget = as.double(budget))
+
+library(tidyverse)
+
+Universal_budget <- assignment_data |>
+  dplyr::filter(primary_company == "Universal Pictures") |>
+  dplyr::select(title, id, status, primary_genre, budget) |>
+  dplyr::mutate(budget = as.double(budget))
+
+head(Universal_budget)
+
 
 
 Universal_budget|>
@@ -30,6 +36,8 @@ normal_fit <- fitdistr(
 )
 
 normal_fit
+
+#plot without log transformation for the normal distribution
 
 ggplot(Universal_budget, aes(x = budget)) +
   geom_histogram(
@@ -71,7 +79,7 @@ Universal_budget <- Universal_budget |>
     budget > 0
   ) |>
   mutate(log_budget = log(budget))
-  
+
 
 Universal_budget <- Universal_budget |>
   filter(
@@ -110,7 +118,7 @@ ggplot(Universal_budget, aes(x = log_budget)) +
     y = "Density"
   ) +
   theme_minimal()
-    
+
 #QQ plot of log-transformed data
 
 ggplot(Universal_budget, aes(sample = log_budget)) +
@@ -146,22 +154,19 @@ Universal_budget_clean <- Universal_budget |>
     budget > 0
   ) |>
   mutate(budget_millions = budget / 10000000)
+
 budget_values <- Universal_budget_clean$budget_millions
 
 
 gamma_fit <- fitdistr(
   budget_values,
-  "gamma",
-  start = list(
-    shape = mean(budget_values)^2 / var(budget_values),
-    rate  = mean(budget_values)   / var(budget_values)
-  ),
-  lower = c(0.001, 0.001)
+  "gamma"
 )
 gamma_fit
 
+# MH playing
+a <- fitdistr(budget_values, 'gamma')
 
-library(ggplot2)
 
 ggplot(data.frame(budget_values = budget_values),
        aes(x = budget_values)) +
@@ -194,6 +199,12 @@ ggplot(data.frame(budget_values = budget_values),
   
   theme_minimal()
 
+
+
+exponential_fit <- fitdistr(
+  budget_values,
+  "exponential"
+)
 
 ggplot(Universal_budget_clean, aes(x = budget)) +
   
@@ -228,8 +239,7 @@ ggplot(Universal_budget_clean, aes(x = budget)) +
 
 weibull_fit <- fitdistr(
   budget_values,
-  "weibull",
-  lower = c(0.001, 0.001)
+  "weibull"
 )
 
 library(ggplot2)
@@ -264,6 +274,64 @@ ggplot(data.frame(budget_values = budget_values),
   ) +
   
   theme_minimal()
+
+library(patchwork)
+# Create a common histogram plot function
+make_plot <- function(curve, distribution_name, curve_colour) {
+  ggplot(
+    data.frame(budget_values = budget_values),
+    aes(x = budget_values)
+  ) +
+    geom_histogram(
+      aes(y = after_stat(density)),
+      bins = 30,
+      fill = "skyblue",
+      colour = "black"
+    ) +
+    stat_function(
+      fun = curve,
+      colour = curve_colour,
+      linewidth = 1.2,
+      args = switch(
+        distribution_name,
+        "Gamma" = list(
+          shape = gamma_fit$estimate["shape"],
+          rate = gamma_fit$estimate["rate"]
+        ),
+        "Exponential" = list(
+          rate = exponential_fit$estimate["rate"]
+        ),
+        "Weibull" = list(
+          shape = weibull_fit$estimate["shape"],
+          scale = weibull_fit$estimate["scale"]
+        )
+      )
+    ) +
+    labs(
+      title = distribution_name,
+      x = "Budget (Units of USD 10 Million)",
+      y = "Density"
+    ) +
+    theme_minimal()
+}
+
+# Create the three plots
+p_gamma <- make_plot(dgamma, "Gamma", "red")
+p_exponential <- make_plot(dexp, "Exponential", "blue")
+p_weibull <- make_plot(dweibull, "Weibull", "darkgreen")
+
+# Combine them into one figure
+(p_gamma | p_exponential | p_weibull) +
+  plot_annotation(
+    title = "Universal Pictures Production Budgets",
+    subtitle = "Comparison of fitted Gamma, Exponential and Weibull distributions"
+  )
+
+
+
+
+
+
 
 
 aic_table <- data.frame(
@@ -333,8 +401,6 @@ ggplot(weibull_qq, aes(x = theoretical, y = observed)) +
   theme_minimal()
 
 
-
-
 exponential_fit <- fitdistr(
   budget_values,
   "exponential"
@@ -366,11 +432,3 @@ ggplot(exponential_qq,
   ) +
   theme_minimal()
 
-#lognormal
-
-lognormal_fit <- fitdistr(
-  Universal_budget_clean$budget,
-  "lognormal"
-)
-
-lognormal_fit

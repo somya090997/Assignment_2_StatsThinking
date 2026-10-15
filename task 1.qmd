@@ -1,0 +1,239 @@
+---
+title: "Assignment 1"
+format: html
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+###Task 1 – Slate Health Check
+
+Analyst: Urvi \| Reviewer: Shravani
+
+```{r}
+library(tidyverse)
+movies <- read.csv("movies.csv", stringsAsFactors = FALSE)
+
+
+target_genres <- c("Action", "Comedy", "Drama", "Horror", "Animation")
+
+movies_5 <- movies |>
+  filter(primary_genre %in% target_genres)
+
+movies_clean <- movies_5 |>
+  filter(budget >= 10000, revenue > 0) |>
+  mutate(
+    budget_m         = budget / 1e6,
+    franchise_status = factor(franchise_status,
+                               levels = c("Original", "Franchise"))
+  )
+```
+
+Data Cleaning
+
+Before any analysis was conducted, missing-data placeholders were removed from the dataset. Per the variable dictionary, budget values of exactly \$0 or below \$10,000 are placeholder entries rather than real production costs, and revenue values of \$0 indicate missing box-office data rather than a genuine zero-revenue result. Of the 3,426 films in the five focus genres, 1,170 were removed on these grounds, leaving a working sample of 2,256 films. All results below are based on this cleaned sample.
+
+### Summary tables
+
+```{r}
+# Budget
+movies_clean |>
+  summarise(
+    n      = n(),
+    mean   = round(mean(budget_m),           1),
+    median = round(median(budget_m),         1),
+    sd     = round(sd(budget_m),             1),
+    Q1     = round(quantile(budget_m, 0.25), 1),
+    Q3     = round(quantile(budget_m, 0.75), 1),
+    max    = round(max(budget_m),            0)
+  )
+
+# ROI
+movies_clean |>
+  summarise(
+    n      = n(),
+    mean   = round(mean(roi),           2),
+    median = round(median(roi),         2),
+    sd     = round(sd(roi),             2),
+    Q1     = round(quantile(roi, 0.25), 2),
+    Q3     = round(quantile(roi, 0.75), 2),
+    max    = round(max(roi),            0)
+  )
+
+# Franchise status
+movies_clean |>
+  count(franchise_status) |>
+  mutate(pct = round(n / sum(n) * 100, 1))
+```
+
+The typical film cost \$25M to produce (median budget) and returned 2.3x its budget at the box office (median ROI). The mean ROI of 13.6x is not a reliable benchmark — it is driven almost entirely by a handful of micro-budget Horror films with extreme returns, most notably Paranormal Activity (\~12,890x ROI). Franchise films represent just 7% of the historical slate, with Originals making up the remaining 93%.
+
+### Visualisations
+
+Both budget and ROI are right-skewed, so a log10 scale is applied to the relevant axes to make distributions readable. The break-even line (ROI = 1) is marked on all ROI plots as a reference.
+
+Define colour palette
+
+```{r}
+genre_colours <- c(
+  Action    = "#E07B54",
+  Animation = "#5B8DB8",
+  Comedy    = "#6BAE75",
+  Drama     = "#B07BB5",
+  Horror    = "#C9485B"
+)
+```
+
+Budget distribution and by genre
+
+```{r}
+# Overall budget distribution
+ggplot(movies_clean, aes(x = budget_m)) +
+  geom_histogram(bins = 35, fill = "#5B8DB8", colour = "white") +
+  scale_x_log10() +
+  geom_vline(xintercept = median(movies_clean$budget_m),
+             colour = "#C9485B", linewidth = 1, linetype = "dashed") +
+  labs(
+    title    = "Distribution of Production Budget (all 5 genres)",
+    subtitle = "Red dashed = median",
+    x        = "Budget USD millions (log10)",
+    y        = "Count"
+  )
+
+# Budget by genre
+ggplot(movies_clean, aes(x = budget_m, fill = primary_genre)) +
+  geom_histogram(bins = 25, colour = "white") +
+  scale_x_log10() +
+  scale_fill_manual(values = genre_colours) +
+  facet_wrap(~ primary_genre, ncol = 3) +
+  geom_vline(xintercept = median(movies_clean$budget_m),
+             colour = "#C9485B", linewidth = 0.8, linetype = "dashed") +
+  labs(
+    title    = "Budget Distribution by Genre (log10 scale)",
+    subtitle = "Red dashed = overall median",
+    x        = "Budget USD millions (log10)",
+    y        = "Count"
+  ) +
+  theme(legend.position = "none")
+```
+
+Production budgets cluster between \$10M–\$50M overall. Animation and Action sit well above the overall median, while Horror sits well below it.
+
+ROI distribution and by genre
+
+```{r}
+# Overall ROI distribution
+ggplot(movies_clean, aes(x = roi + 0.01)) +
+  geom_histogram(bins = 35, fill = "#6BAE75", colour = "white") +
+  scale_x_log10() +
+  geom_vline(xintercept = median(movies_clean$roi) + 0.01,
+             colour = "#C9485B", linewidth = 1, linetype = "dashed") +
+  labs(
+    title    = "Distribution of ROI (all 5 genres)",
+    subtitle = "Red dashed = median. Break-even at ROI = 1.",
+    x        = "ROI (log10)",
+    y        = "Count"
+  )
+
+# ROI by genre
+ggplot(movies_clean, aes(x = roi + 0.01, fill = primary_genre)) +
+  geom_histogram(bins = 25, colour = "white") +
+  scale_x_log10() +
+  scale_fill_manual(values = genre_colours) +
+  facet_wrap(~ primary_genre, ncol = 3) +
+  geom_vline(xintercept = 1,
+             colour = "#C9485B", linewidth = 0.8, linetype = "dashed") +
+  labs(
+    title    = "ROI Distribution by Genre (log10 scale)",
+    subtitle = "Red dashed = break-even (ROI = 1)",
+    x        = "ROI (log10)",
+    y        = "Count"
+  ) +
+  theme(legend.position = "none")
+```
+
+Franchise composition overall and by genre
+
+```{r}
+# Overall franchise bar
+movies_clean |>
+  count(franchise_status) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = franchise_status, y = pct, fill = franchise_status)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = paste0(round(pct, 1), "%")),
+            vjust = -0.4, size = 4) +
+  scale_fill_manual(values = c(Original = "#5B8DB8", Franchise = "#E07B54")) +
+  labs(
+    title = "Overall Slate Composition",
+    x     = NULL,
+    y     = "% of films"
+  ) +
+  ylim(0, 105) +
+  theme(legend.position = "none")
+
+# Franchise by genre using facet_wrap
+movies_clean |>
+  group_by(primary_genre, franchise_status) |>
+  summarise(n = n(), .groups = "drop") |>
+  group_by(primary_genre) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = franchise_status, y = pct, fill = franchise_status)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(round(pct, 1), "%")),
+            vjust = -0.4, size = 3) +
+  scale_fill_manual(values = c(Original = "#5B8DB8", Franchise = "#E07B54")) +
+  facet_wrap(~ primary_genre, ncol = 3) +
+  labs(
+    title = "Franchise vs. Original by Genre",
+    x     = NULL,
+    y     = "% within genre"
+  ) +
+  ylim(0, 110) +
+  theme(legend.position = "none")
+```
+
+```{r}
+trend_summary <- movies_clean |>
+  filter(release_year >= 2000, release_year <= 2016) |>
+  group_by(release_year) |>
+  summarise(
+    n_films       = n(),
+    median_budget = median(budget_m),
+    median_roi    = median(roi),
+    pct_franchise = sum(franchise_status == "Franchise") / n() * 100,
+    .groups       = "drop"
+  )
+```
+
+Franchise films make up 7% of the overall slate. Horror (21%) and Action (11%) have the highest franchise concentration; Drama sits lowest at just 1%.
+
+Three trend lines
+
+```{r}
+trend_summary |>
+  pivot_longer(
+    cols      = c(median_budget, median_roi, pct_franchise),
+    names_to  = "metric",
+    values_to = "value"
+  ) |>
+  mutate(metric = recode(metric,
+    median_budget  = "Median Budget (USD millions)",
+    median_roi     = "Median ROI",
+    pct_franchise  = "Franchise Share (%)"
+  )) |>
+  ggplot(aes(x = release_year, y = value)) +
+  geom_line(colour = "#5B8DB8", linewidth = 0.9) +
+  geom_point(colour = "#5B8DB8", size = 1.8) +
+  geom_smooth(method = "loess", se = FALSE,
+              colour = "#C9485B", linewidth = 0.9, linetype = "dashed") +
+  facet_wrap(~ metric, ncol = 1, scales = "free_y") +
+  labs(
+    title    = "Slate Trends Over Time (2000–2016)",
+    subtitle = "Red dashed = LOESS trend",
+    x        = "Release Year",
+    y        = NULL
+  ) +
+  scale_x_continuous(breaks = seq(2000, 2016, 4))
+```

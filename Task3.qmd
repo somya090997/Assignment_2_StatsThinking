@@ -1,0 +1,442 @@
+---
+title: "Task 3"
+author: "Somya Verma"
+format: html
+editor: visual
+---
+
+```{r}
+#Library Loadings
+
+
+library(dplyr)
+library(tidyverse)
+library(MASS)
+library(ggplot2)
+library(gt)
+library(patchwork)
+```
+```{r}
+#loading the data
+assignment_data<-read.csv("data/movies.csv")
+
+```
+
+# Task 3 
+
+
+## Part A 
+
+Universal Pictures was selected as the external benchmark for Meridian Pictures because its historical production budgets provide a reference point for understanding competitor spending. After filtering the dataset to Universal Pictures films and excluding records with missing, non-finite or non-positive budgets, 260 films were retained for the descriptive analysis.
+
+The summary statistics show a mean production budget of approximately $41.57 million, a median of $30.50 million, and a standard deviation of approximately $37.89 million. The mean is higher than the median, suggesting that a relatively small number of high-budget films raise the average. The substantial standard deviation also indicates considerable variation in production spending across films.
+
+These results suggest that a single average budget may not adequately represent the range of production costs. A probability distribution is therefore useful for modelling the variation in budgets and estimating the likelihood of different spending levels.
+
+```{r}
+# Fitting in the data with normal distribution
+
+Universal_budget <- assignment_data |>
+  dplyr::filter(primary_company == "Universal Pictures") |>
+  dplyr::select(title, id, status, primary_genre, budget) |>
+  dplyr::mutate(budget = as.double(budget))
+
+#checking for any negative, zero or other anomaly in budget
+
+Universal_budget |>
+  summarise(
+    total_films = n(),
+    missing_budgets = sum(is.na(budget)),
+    zero_budgets = sum(budget == 0, na.rm = TRUE),
+    negative_budgets = sum(budget < 0, na.rm = TRUE),
+    positive_budgets = sum(budget > 0, na.rm = TRUE)
+  )
+
+
+#Summary statistics
+
+budget_summary <- Universal_budget |>
+  summarise(
+    n = n(),
+    mean_budget = mean(budget, na.rm = TRUE),
+    median_budget = median(budget, na.rm = TRUE),
+    sd_budget = sd(budget, na.rm = TRUE)
+  )
+
+#creating the table out of the summary statistics
+
+budget_summary |>
+  gt() |>
+  tab_header(
+    title = "Universal Pictures Production Budget Summary",
+    subtitle = "Descriptive statistics of historical film budgets"
+  ) |>
+  cols_label(
+    n = "Number of Films",
+    mean_budget = "Mean Budget (USD)",
+    median_budget = "Median Budget (USD)",
+    sd_budget = "Standard Deviation (USD)"
+  ) |>
+  fmt_number(
+    columns = c(mean_budget, median_budget, sd_budget),
+    decimals = 2,
+    use_seps = TRUE
+  ) |>
+  fmt_number(
+    columns = n,
+    decimals = 0,
+    use_seps = TRUE
+  ) |>
+  opt_row_striping() |>
+  opt_table_outline() |>
+  tab_source_note(
+    source_note = "Source: Historical Universal Pictures film budget data."
+)
+
+```
+
+## Assessment of the Normal Distribution
+
+The histogram of Universal Pictures' production budgets shows a positively skewed distribution. Most films have budgets concentrated at the lower end, while a smaller number of productions have substantially higher budgets, creating a long right tail.
+
+The fitted normal curve does not adequately represent this pattern. A normal distribution is symmetric around its mean, whereas the observed budgets are strongly right-skewed. The dashed vertical line marks the mean budget of approximately $41.57 million, which lies to the right of the main concentration of observations.
+
+This mismatch suggests that the normal distribution may be an unrealistic model for Universal Pictures' production budgets. In particular, it may misrepresent the probabilities of lower and exceptionally high budgets. Alternative distributions designed to accommodate positive, right-skewed data should therefore be considered.
+
+
+```{r}
+#plotting the graph 
+
+ggplot(Universal_budget, aes(x = budget)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    bins = 30,
+    fill = "skyblue",
+    colour = "black"
+  ) +
+  stat_function(
+    fun = dnorm,
+    args = list(
+      mean = mean(Universal_budget$budget, na.rm= TRUE),
+      sd= sd(Universal_budget$budget, na.rm= TRUE)
+      
+    ),
+    colour = "brown",
+    linewidth = 1.2
+  ) +
+  geom_vline(
+    xintercept = mean(Universal_budget$budget, na.rm = TRUE),
+    colour = "darkblue",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  labs(
+    title = "Universal Pictures Production Budgets",
+    subtitle = "Histogram with fitted normal distribution",
+    x = "Production Budget (USD)",
+    y = "Density"
+  ) +
+  theme_minimal()
+
+```
+## Choice of the alternative distribution and modelling
+
+To identify a realistic probability model, normal, log-normal, Gamma, Exponential and Weibull distributions were considered. Their fitted curves and Q-Q plots were used to assess how closely the theoretical distributions represented the observed budgets, while AIC was used to compare their relative fit. The final model will be selected based on the AIC results and supporting diagnostic plots.
+
+
+**Note :Budgets were then divided by 10,000,000 to improve numerical convenience during model estimation while preserving their relative distribution**
+
+```{r}
+Universal_budget_clean <- Universal_budget |>
+  filter(
+    !is.na(budget),
+    is.finite(budget),
+    budget > 0
+  ) |>
+  mutate(budget_millions = budget / 10000000)
+
+budget_values <- Universal_budget_clean$budget_millions
+
+
+gamma_fit <- fitdistr(
+  budget_values,
+  "gamma"
+)
+
+weibull_fit <- fitdistr(
+  budget_values,
+  "weibull"
+)
+
+exponential_fit <- fitdistr(
+  budget_values,
+  "exponential"
+)
+
+```
+
+## Graphical Representation of Model Choice
+
+@fig-budget-distributions compares the Gamma, Exponential and Weibull distributions fitted to Universal Pictures' production budgets. The observed budgets are positively skewed, with most films concentrated at lower budget levels and a smaller number of films having substantially higher budgets.
+
+The Gamma and Weibull distributions appear to capture the overall shape of the histogram reasonably well, including its peak and long right tail. The Exponential distribution declines more sharply from the lower end and appears to represent the concentration of budgets around the peak less accurately.
+
+```{r}
+#| label: fig-budget-distributions
+#| fig-cap: "Comparison of fitted Gamma, Exponential and Weibull distributions for Universal Pictures' production budgets."
+#| fig-width: 12
+#| fig-height: 5
+#plotting the three fits in histogram
+
+make_plot <- function(curve, distribution_name, curve_colour) {
+
+  ggplot(
+    data.frame(budget_values = budget_values),
+    aes(x = budget_values)
+  ) +
+
+    geom_histogram(
+      aes(y = after_stat(density)),
+      bins = 30,
+      fill = "skyblue",
+      colour = "black"
+    ) +
+
+    stat_function(
+      fun = curve,
+      colour = curve_colour,
+      linewidth = 1.2,
+      args = switch(
+        distribution_name,
+
+        "Gamma" = list(
+          shape = gamma_fit$estimate["shape"],
+          rate = gamma_fit$estimate["rate"]
+        ),
+
+        "Exponential" = list(
+          rate = exponential_fit$estimate["rate"]
+        ),
+
+        "Weibull" = list(
+          shape = weibull_fit$estimate["shape"],
+          scale = weibull_fit$estimate["scale"]
+        )
+      )
+    ) +
+
+    labs(
+      title = distribution_name,
+      x = NULL,
+      y = "Density"
+    ) +
+
+    theme_minimal() +
+
+    theme(
+      axis.title.x = element_blank()
+    )
+}
+
+
+# Create the three plots
+p_gamma <- make_plot(
+  dgamma, "Gamma", "red"
+)
+
+p_exponential <- make_plot(
+  dexp, "Exponential", "blue"
+)
+
+p_weibull <- make_plot(
+  dweibull, "Weibull", "darkgreen"
+)
+
+combined_plot <- (
+  p_gamma | p_exponential | p_weibull
+) +
+
+  plot_annotation(
+    title = "Universal Pictures Production Budgets",
+    subtitle = paste(
+      "Comparison of fitted Gamma, Exponential",
+      "and Weibull distributions"
+    ),
+    caption = "Budget (Units of USD 10 Million)"
+  ) &
+
+  theme(
+    plot.caption = element_text(
+      hjust = 0.5,
+      size = 11,
+      colour = "black"
+    )
+  )
+
+
+# Display the final figure
+combined_plot
+
+```
+
+The @fig-budget-qq  compare the observed production budgets of Universal Pictures with the fitted Gamma, Exponential and Weibull distributions. The Gamma and Weibull distributions align more closely with the reference line across most of the budget range, although both deviate for higher-budget films. The Exponential distribution shows greater deviation, suggesting a weaker fit. Overall, the plots indicate that Gamma and Weibull are more suitable for modelling production budgets, with Gamma appearing to provide a slightly better fit.
+
+
+
+```{r}
+#| label: fig-budget-qq
+#| fig-cap: "Q-Q plots comparing Gamma, Exponential and Weibull distributions fitted to Universal Pictures' production budgets."
+#| fig-width: 12
+#| fig-height: 5
+
+
+n <- length(budget_values)
+p <- ppoints(n)
+observed <- sort(budget_values)
+
+# Gamma Q-Q plot data
+gamma_qq <- data.frame(
+  theoretical = qgamma(
+    p,
+    shape = gamma_fit$estimate["shape"],
+    rate = gamma_fit$estimate["rate"]
+  ),
+  observed = observed
+)
+
+# Exponential Q-Q plot data
+exponential_qq <- data.frame(
+  theoretical = qexp(
+    p,
+    rate = exponential_fit$estimate["rate"]
+  ),
+  observed = observed
+)
+
+# Weibull Q-Q plot data
+weibull_qq <- data.frame(
+  theoretical = qweibull(
+    p,
+    shape = weibull_fit$estimate["shape"],
+    scale = weibull_fit$estimate["scale"]
+  ),
+  observed = observed
+)
+
+
+# Function to create each Q-Q plot
+make_qq_plot <- function(qq_data, distribution_name) {
+
+  ggplot(
+    qq_data,
+    aes(x = theoretical, y = observed)
+  ) +
+    geom_point(size = 1.5) +
+    geom_abline(
+      intercept = 0,
+      slope = 1,
+      colour = "red",
+      linewidth = 0.7
+    ) +
+    labs(
+      title = distribution_name,
+      x = NULL,
+      y = "Observed Quantiles"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.title.x = element_blank(),
+      plot.title = element_text(
+        face = "bold",
+        hjust = 0.5
+      )
+    )
+}
+
+
+# Create individual plots
+qq_gamma <- make_qq_plot(
+  gamma_qq, "Gamma"
+)
+
+qq_exponential <- make_qq_plot(
+  exponential_qq, "Exponential"
+)
+
+qq_weibull <- make_qq_plot(
+  weibull_qq, "Weibull"
+)
+
+
+# Combine all three Q-Q plots
+combined_qq <- (
+  qq_gamma | qq_exponential | qq_weibull
+) +
+  plot_annotation(
+    title = "Q-Q Plot Comparison of Production Budget Distributions",
+    subtitle = "Universal Pictures | Budgets in units of USD 10 million",
+    caption = "The red line represents theoretical agreement."
+  ) &
+  theme(
+    plot.caption = element_text(
+      hjust = 0.5,
+      size = 10
+    )
+  )
+
+# Display the combined figure
+combined_qq
+```
+
+
+
+
+## Comparing the AIC for Decision making
+
+The AIC results indicate that the Gamma distribution provides the best relative fit for Universal Pictures’ production budgets, with a score of 1201.090. The Weibull distribution performs almost equally well (1201.542), while the Exponential distribution has a higher AIC (1213.346), indicating a weaker fit. For Meridian Pictures, Gamma is therefore the preferred model for estimating historical budget patterns, although Weibull remains a reasonable alternative.
+
+```{r}
+aic_table <- data.frame(
+  Distribution = c(
+    "Gamma",
+    "Exponential",
+    "Weibull"
+  ),
+  AIC = c(
+    AIC(gamma_fit),
+    AIC(exponential_fit),
+    AIC(weibull_fit)
+  )
+)
+
+#creating the table to see clearly
+
+aic_table |>
+  gt() |>
+  tab_header(
+    title = "Comparison of Fitted Distributions",
+    subtitle = "Akaike Information Criterion (AIC)"
+  ) |>
+  cols_label(
+    Distribution = "Distribution",
+    AIC = "AIC Value"
+  ) |>
+  fmt_number(
+    columns = AIC,
+    decimals = 3
+  ) |>
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_body(
+      columns = AIC,
+      rows = AIC == min(AIC)
+    )
+  ) |>
+  tab_source_note(
+    source_note = "Lower AIC values indicate a better relative model fit."
+  )
+
+
+
+```
+
