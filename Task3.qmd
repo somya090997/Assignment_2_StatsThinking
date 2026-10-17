@@ -703,7 +703,7 @@ comparison_table |>
 
 ## Part D
 
-The method choices allow Meridian Pictures to use historical data to support financial planning. The Gamma distribution provides a suitable model for simulating Universal Pictures' right-skewed production budgets, while the non-parametric bootstrap estimates the lower-quarter revenue-to-budget ratio for Action films without assuming a normal distribution.
+The method choices allow Meridian Pictures to use historical data to support financial planning. Universal Pictures' budgets are right-skewed, so a normal distribution may not represent them well. The Gamma distribution provides a suitable model for simulating Universal Pictures' right-skewed production budgets, while the non-parametric bootstrap estimates the lower-quarter revenue-to-budget ratio for Action films without assuming a normal distribution.
 
 
 The resulting estimate of 0.5764, with a confidence interval of approximately 0.467–0.676, gives the finance team a downside-risk benchmark and communicates its uncertainty. Together, these results support more realistic budget simulations and more cautious assessment of potential Action film outcomes.
