@@ -12,9 +12,12 @@ execute:
 Analyst: Urvi \| Reviewer: Shravani
 
 ```{r}
-library(tidyverse)
-movies <- read.csv("data/movies.csv")
+#| warning: false
+#| message: false
 
+library(tidyverse)
+
+movies <- read.csv("data/movies.csv", stringsAsFactors = FALSE)
 
 target_genres <- c("Action", "Comedy", "Drama", "Horror", "Animation")
 
@@ -22,9 +25,11 @@ movies_5 <- movies |>
   filter(primary_genre %in% target_genres)
 
 movies_clean <- movies_5 |>
-  filter(budget >= 10000, revenue > 0) |>
   mutate(
-    budget_m         = budget / 1e6,
+    budget   = if_else(budget == 0 | budget < 10000, NA_real_, budget),
+    revenue  = if_else(revenue == 0, NA_real_, revenue),
+    roi      = revenue / budget,
+    budget_m = budget / 1e6,
     franchise_status = factor(franchise_status,
                                levels = c("Original", "Franchise"))
   )
@@ -32,36 +37,35 @@ movies_clean <- movies_5 |>
 
 Data Cleaning
 
-Before any analysis was conducted, missing-data placeholders were removed from the dataset. Per the variable dictionary, budget values of exactly \$0 or below \$10,000 are placeholder entries rather than real production costs, and revenue values of \$0 indicate missing box-office data rather than a genuine zero-revenue result. Of the 3,426 films in the five focus genres, 1,170 were removed on these grounds, leaving a working sample of 2,256 films. All results below are based on this cleaned sample.
-
+Before any analysis was conducted, missing-data placeholders were identified and replaced with NA rather than removed. Per the variable dictionary, budget values of exactly $0 or below $10,000 are placeholder entries, and revenue values of $0 indicate missing box-office data. Rather than dropping these rows entirely, the affected values were converted to NA, retaining all 3,426 films in the five focus genres. Rows with NA budget or revenue are excluded automatically by R when calculating financial summaries and plots, but are retained for analyses such as franchise composition that do not require financial data.
 ### Summary tables
 
 ```{r}
 # Budget
 movies_clean |>
   summarise(
-    n      = n(),
-    mean   = round(mean(budget_m),           1),
-    median = round(median(budget_m),         1),
-    sd     = round(sd(budget_m),             1),
-    Q1     = round(quantile(budget_m, 0.25), 1),
-    Q3     = round(quantile(budget_m, 0.75), 1),
-    max    = round(max(budget_m),            0)
+    n      = sum(!is.na(budget_m)),
+    mean   = round(mean(budget_m,            na.rm = TRUE), 1),
+    median = round(median(budget_m,          na.rm = TRUE), 1),
+    sd     = round(sd(budget_m,              na.rm = TRUE), 1),
+    Q1     = round(quantile(budget_m, 0.25,  na.rm = TRUE), 1),
+    Q3     = round(quantile(budget_m, 0.75,  na.rm = TRUE), 1),
+    max    = round(max(budget_m,             na.rm = TRUE), 0)
   )
 
 # ROI
 movies_clean |>
   summarise(
-    n      = n(),
-    mean   = round(mean(roi),           2),
-    median = round(median(roi),         2),
-    sd     = round(sd(roi),             2),
-    Q1     = round(quantile(roi, 0.25), 2),
-    Q3     = round(quantile(roi, 0.75), 2),
-    max    = round(max(roi),            0)
+    n      = sum(!is.na(roi)),
+    mean   = round(mean(roi,            na.rm = TRUE), 2),
+    median = round(median(roi,          na.rm = TRUE), 2),
+    sd     = round(sd(roi,              na.rm = TRUE), 2),
+    Q1     = round(quantile(roi, 0.25,  na.rm = TRUE), 2),
+    Q3     = round(quantile(roi, 0.75,  na.rm = TRUE), 2),
+    max    = round(max(roi,             na.rm = TRUE), 0)
   )
 
-# Franchise status
+# Franchise — uses all 3426 rows, no na.rm needed
 movies_clean |>
   count(franchise_status) |>
   mutate(pct = round(n / sum(n) * 100, 1))
@@ -200,8 +204,8 @@ trend_summary <- movies_clean |>
   group_by(release_year) |>
   summarise(
     n_films       = n(),
-    median_budget = median(budget_m),
-    median_roi    = median(roi),
+    median_budget = median(budget_m,  na.rm = TRUE),
+    median_roi    = median(roi,        na.rm = TRUE),
     pct_franchise = sum(franchise_status == "Franchise") / n() * 100,
     .groups       = "drop"
   )
