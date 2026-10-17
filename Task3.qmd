@@ -154,7 +154,7 @@ ggplot(Universal_budget, aes(x = budget)) +
 
 To identify a realistic probability model, normal, log-normal, Gamma, Exponential and Weibull distributions were considered. Their fitted curves and Q-Q plots were used to assess how closely the theoretical distributions represented the observed budgets, while AIC was used to compare their relative fit. The final model will be selected based on the AIC results and supporting diagnostic plots.
 
-**Note :Budgets were then divided by 10,000,000 to improve numerical convenience during model estimation while preserving their relative distribution**
+**Note :Budgets were then divided by 10,000,000 to improve numerical convenience during model estimation while preserving their relative distribution.**
 
 ```{r}
 Universal_budget_clean <- Universal_budget |>
@@ -454,7 +454,7 @@ aic_table |>
 
 ## Part B
 
-Action films from all studios were selected to assess the downside risk of the Action genre. The data was checked for missing, zero, negative and infinite values across numeric variables. 
+Action films from all studios were selected to assess the downside risk of the Action genre. The data was checked for missing, zero, negative and infinite values across numeric variables.
 
 Films with zero budgets were identified because ROI cannot be reliably calculated when the budget is zero. Missing and infinite ROI values were excluded from the analysis, while valid zero and negative ROI values were retained because they may represent genuine financial outcomes.
 
@@ -505,7 +505,6 @@ action_data_clean<- action_data |> mutate(
 
 ```
 
-
 The 25th percentile of ROI was estimated using non-parametric bootstrapping with 15,000 resamples. This method repeatedly resamples the observed ROI values with replacement, without assuming a specific probability distribution.
 
 The estimated 25th percentile was 0.5764, with a 95% confidence interval of 0.4963 to 0.6596. This suggests that the lower-performing quarter of Action films has an ROI threshold of approximately 0.5764, with uncertainty reflected in the confidence interval.
@@ -546,9 +545,6 @@ bootstrap_CI <- quantile(
 q25
 bootstrap_CI
 ```
-
-
-
 
 ```{r parametric}
 
@@ -641,7 +637,6 @@ ggplot(roi_data, aes(x = roi)) +
   theme_minimal()
 ```
 
-
 As shown in @tbl-roi-comparison, the non-parametric bootstrap estimates the 25th percentile at 0.5764, with a 95% confidence interval of 0.4963–0.6596, while the normal parametric bootstrap estimates it at −0.8080.
 
 The **non-parametric bootstrap** is preferred because it preserves the observed distribution without assuming normality. For Meridian Pictures, this provides a more defensible estimate of lower-end ROI, supporting investment decisions that account for the actual variation in Action-film returns.
@@ -705,5 +700,3 @@ comparison_table |>
     )
   )
 ```
-
-

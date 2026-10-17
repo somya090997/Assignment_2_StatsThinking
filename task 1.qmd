@@ -13,7 +13,7 @@ Analyst: Urvi \| Reviewer: Shravani
 
 ```{r}
 library(tidyverse)
-movies <- read.csv("movies.csv", stringsAsFactors = FALSE)
+movies <- read.csv("data/movies.csv")
 
 
 target_genres <- c("Action", "Comedy", "Drama", "Horror", "Animation")
