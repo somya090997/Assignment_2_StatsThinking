@@ -33,6 +33,8 @@ movies_clean <- movies_5 |>
     franchise_status = factor(franchise_status,
                                levels = c("Original", "Franchise"))
   )
+
+glimpse (movies_clean)
 ```
 
 Data Cleaning
