@@ -119,3 +119,16 @@ movies |>
 
 #profit summary
 
+# Calculate total profit share based on t2
+t2 |>
+  mutate(profit = revenue - budget) |>
+  group_by(franchise_status) |>
+  summarise(
+    n_total = n(),
+    n_valid_budget = sum(!is.na(budget)),
+    total_profit_b = sum(profit, na.rm = TRUE) / 1e9
+  ) |>
+  mutate(
+    share_of_profit = round(total_profit_b / sum(total_profit_b), 4),
+    share_percent = scales::percent(share_of_profit, accuracy = 0.01)
+  )
