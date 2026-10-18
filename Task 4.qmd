@@ -5,5 +5,54 @@ format: html
 editor: visual
 ---
 
+#### Part A – Defining the outcome and justifying the model
 
+A film is defined as a **flop** if it fails to recoup its production budget at the box office, i.e. ROI \< 1. This is created as a binary variable: 1 = flop, 0 = not a flop.
 
+```{r}
+#| warning: false
+#| message: false
+
+library(tidyverse)
+
+movies <- read.csv("data/movies.csv", stringsAsFactors = FALSE)
+
+target_genres <- c("Action", "Comedy", "Drama", "Horror", "Animation")
+
+movies_clean <- movies |>
+  filter(primary_genre %in% target_genres) |>
+  mutate(
+    budget           = if_else(budget == 0 | budget < 10000, NA_real_, budget),
+    revenue          = if_else(revenue == 0, NA_real_, revenue),
+    roi              = revenue / budget,
+    budget_m         = budget / 1e6,
+    franchise_status = factor(franchise_status,
+                              levels = c("Original", "Franchise"))
+  )
+
+movies_model <- movies_clean |>
+  filter(!is.na(roi)) |>
+  mutate(flop = if_else(roi < 1, 1, 0))
+
+# Check the split
+movies_model |>
+  count(flop) |>
+  mutate(pct = round(n / sum(n) * 100, 1))
+```
+
+```{r}
+movies_model |>
+  group_by(primary_genre) |>
+  summarise(
+    n_films   = n(),
+    n_flops   = sum(flop),
+    flop_rate = round(mean(flop) * 100, 1)
+  ) |>
+  arrange(desc(flop_rate))
+```
+
+### Why Logistic Regression?
+
+We are using logistic regression because we want to predict whether a film will flop or not. Since there are only two possible outcomes, this is a binary classification problem. Linear regression is not ideal because it is designed to predict continuous values and can produce results outside the 0 to 1 range. Poisson regression is mainly used for predicting counts, such as the number of events that occur.
+
+Logistic regression is a better fit because it predicts the probability of a film flopping, with values always between 0 and 1. It also helps us understand how different factors influence the chances of a flop. For example, we can compare franchise films with original films while keeping genre and budget constant. This gives the Head of Production useful insights to make more informed decisions about which films to greenlight.
