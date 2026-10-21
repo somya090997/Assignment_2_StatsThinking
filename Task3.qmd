@@ -703,11 +703,10 @@ comparison_table |>
 
 ## Part D
 
-The method choices allow Meridian Pictures to use historical data to support financial planning. Universal Pictures' budgets are right-skewed, so a normal distribution may not represent them well. The Gamma distribution provides a suitable model for simulating Universal Pictures' right-skewed production budgets. 
+The method choices allow Meridian Pictures to use historical data to support financial planning. Universal Pictures' budgets are right-skewed, so a normal distribution may not represent them well. The Gamma distribution provides a suitable model for simulating Universal Pictures' right-skewed production budgets.
 
-The non-parametric bootstrap estimates the lower-quarter revenue-to-budget ratio for Action films without assuming a normal distribution. The resulting estimate of 0.5764, with a confidence interval of approximately 0.467–0.676, gives the finance team a downside-risk benchmark and communicates its uncertainty. The ROI represented by the data is revenue divided by production budget, a ratio of 0.5764 means approximately 58 cents in revenue per $1 of production budget. It does not mean a 58% profit or return.
+The non-parametric bootstrap estimates the lower-quarter revenue-to-budget ratio for Action films without assuming a normal distribution. The resulting estimate of 0.5764, with a confidence interval of approximately 0.467–0.676, gives the finance team a downside-risk benchmark and communicates its uncertainty. The ROI represented by the data is revenue divided by production budget, a ratio of 0.5764 means approximately 58 cents in revenue per \$1 of production budget. It does not mean a 58% profit or return.
 
 It gives the finance team a benchmark for the downside risk associated with Action films. The confidence interval also shows the uncertainty around that estimate, rather than presenting it as an exact value.
-
 
 Together, these results support more realistic budget simulations and more cautious assessment of potential Action film outcomes.
