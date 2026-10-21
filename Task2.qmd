@@ -11,48 +11,69 @@ editor: visual
 #| label: t2-setup
 #| message: false
 #| warning: false
-
 library(tidyverse)
 set.seed(24252678)
 
-movies <- read_csv("data/movies.csv")
-
-# Budgets below $10,000 are placeholders, so treat them as missing
-t2 <- movies |>
-  mutate(budget = if_else(budget < 10000, NA_real_, budget)) |>
-  filter(!is.na(budget), !is.na(franchise_status)) |>
+# Same cleaning as Task 1: placeholders become NA and all rows are kept
+movies <- read_csv("data/movies.csv") |>
   mutate(
-    franchise_status = factor(franchise_status, levels = c("Original", "Franchise")),
-    budget_m = budget / 1e6   # budget in USD millions
+    budget  = if_else(budget < 10000, NA_real_, budget),
+    revenue = if_else(revenue == 0, NA_real_, revenue)
   )
 
+# Films with a usable budget (a median needs a budget)
+t2 <- movies |>
+  filter(!is.na(budget), !is.na(franchise_status)) |>
+  mutate(franchise_status = factor(franchise_status, levels = c("Original", "Franchise")))
+```
+
+Budgets below \$10,000 are placeholders, so they were set to `NA` and no rows were deleted. Films with no usable budget are left out of the budget comparison only, because a median cannot be calculated without a budget. @tbl-t2-missing shows how many films this affects.
+
+```{r}
+#| label: tbl-t2-missing
+#| tbl-cap: "Films with and without a usable budget, by franchise status"
+movies |>
+  filter(!is.na(franchise_status)) |>
+  group_by(franchise_status) |>
+  summarise(
+    films = n(),
+    usable_budget = sum(!is.na(budget)),
+    missing_budget = sum(is.na(budget)),
+    pct_missing = round(100 * mean(is.na(budget)), 1)
+  ) |>
+  knitr::kable(col.names = c("Franchise status", "Films", "Usable budget", "Missing budget", "% missing"))
+```
+
+### 1. Comparing the budget distributions
+
+```{r}
+#| label: tbl-t2-summary
+#| tbl-cap: "Budget summary by franchise status (USD millions)"
 t2 |>
   group_by(franchise_status) |>
   summarise(
-    n = n(),
-    min = min(budget_m),
-    q1 = quantile(budget_m, 0.25),
-    median = median(budget_m),
-    mean = mean(budget_m),
-    q3 = quantile(budget_m, 0.75),
-    max = max(budget_m),
-    sd = sd(budget_m)
+    n = n(), min = min(budget), q1 = quantile(budget, 0.25),
+    median = median(budget), mean = mean(budget),
+    q3 = quantile(budget, 0.75), max = max(budget), sd = sd(budget)
   ) |>
-  mutate(across(min:sd, ~ round(.x, 1)))
+  mutate(across(min:sd, ~ round(.x / 1e6, 1))) |>
+  knitr::kable(col.names = c("Franchise status", "n", "Min", "Q1", "Median", "Mean", "Q3", "Max", "SD"))
 ```
 
-The budget distributions show that franchise films generally receive higher budgets than original films. Franchise films have a median budget of \$40 million, whereas \$22 million for original films. Both distributions are right-skewed with considerable overlap, indicating that some original films also receive large budgets.
-
 ```{r}
-#| label: t2-plot
+#| label: fig-t2-plot
+#| fig-cap: "Budget distributions by franchise status (log scale, axis labelled in dollars)"
 #| fig-height: 4
 #| fig-width: 8
-ggplot(t2, aes(x = budget_m, fill = franchise_status)) +
+ggplot(t2, aes(x = budget, fill = franchise_status)) +
   geom_density(alpha = 0.4) +
-  scale_x_log10() +
+  scale_x_log10(
+    breaks = c(1e5, 1e6, 1e7, 1e8),
+    labels = c("$0.1M", "$1M", "$10M", "$100M")
+  ) +
   labs(
     title = "Franchise budgets sit higher, but the two groups overlap heavily",
-    x = "Production budget (USD millions, log scale)",
+    x = "Production budget (log scale)",
     y = "Density",
     fill = "Franchise status"
   ) +
@@ -60,34 +81,42 @@ ggplot(t2, aes(x = budget_m, fill = franchise_status)) +
 ```
 
 ```{r}
-#| label: t2-box
+#| label: fig-t2-box
+#| fig-cap: "Budget by franchise status (log scale). The line in each box is the median."
 #| fig-height: 3
 #| fig-width: 8
-ggplot(t2, aes(x = budget_m, y = franchise_status)) +
+ggplot(t2, aes(x = budget, y = franchise_status)) +
   geom_boxplot() +
-  scale_x_log10() +
-  labs(x = "Production budget (USD millions, log scale)", y = NULL) +
+  scale_x_log10(
+    breaks = c(1e5, 1e6, 1e7, 1e8),
+    labels = c("$0.1M", "$1M", "$10M", "$100M")
+  ) +
+  labs(x = "Production budget (log scale)", y = NULL) +
   theme_minimal()
 ```
 
+Both are positively skewed (@fig-t2-plot); most movies have low budgets, with a few having extremely high budgets, so the median will provide a good estimate of a typical movie rather than the mean. @tbl-t2-summary indicates a median budget of \$40M for Franchises compared to \$22M for Originals, and this can be seen in @fig-t2-box. The two categories overlap significantly, hence many movies from Originals are expensive than many movies from Franchises. A log scale is used because we want to see the majority of the movies, and real values are shown in @tbl-t2-summary.
+
+### 2. Interval estimate for the difference in median budget
+
+We used a 95% percentile bootstrap interval (Week 6): each group was resampled with replacement at its own size, Franchise median minus Original median was calculated, this was repeated 5,000 times, and the middle 95% was taken. All calculations are in dollars.
+
 ```{r}
 #| label: t2-boot
-# Observed difference in medians
 obs_diff <- t2 |>
   group_by(franchise_status) |>
-  summarise(median_budget = median(budget_m)) |>
+  summarise(median_budget = median(budget)) |>
   summarise(
     diff = median_budget[franchise_status == "Franchise"] -
            median_budget[franchise_status == "Original"]
   ) |>
   pull(diff)
 
-# One bootstrap - resample each group with replacement at its own size
 perform_bootstrap <- function(bootstrap_number) {
   t2 |>
     group_by(franchise_status) |>
     slice_sample(prop = 1, replace = TRUE) |>
-    summarise(median_budget = median(budget_m)) |>
+    summarise(median_budget = median(budget)) |>
     summarise(
       boot_diff = median_budget[franchise_status == "Franchise"] -
                   median_budget[franchise_status == "Original"]
@@ -95,58 +124,72 @@ perform_bootstrap <- function(bootstrap_number) {
     mutate(bootstrap_sample = bootstrap_number)
 }
 
-# Run 5000 bootstrap samples
-bootstrap_results <- map_dfr(
-  .x = 1:5000,
-  .f = perform_bootstrap
-)
+bootstrap_results <- map_dfr(.x = 1:5000, .f = perform_bootstrap)
 
-# 95% percentile bootstrap interval
-bootstrap_results |>
-  summarise(
-    observed_diff = obs_diff,
-    lower_CI = quantile(boot_diff, 0.025),
-    upper_CI = quantile(boot_diff, 0.975)
-  )
+ci <- quantile(bootstrap_results$boot_diff, c(0.025, 0.975))
 ```
 
 ```{r}
-#| label: t2-boot-plot
-#| fig-height: 3.5
+#| label: tbl-t2-ci
+#| tbl-cap: "Difference in median budget (Franchise minus Original) with 95% bootstrap interval (USD millions)"
+tibble(observed = obs_diff, lower = ci[1], upper = ci[2]) |>
+  mutate(across(everything(), ~ round(.x / 1e6, 1))) |>
+  knitr::kable(col.names = c("Observed difference", "Lower 95%", "Upper 95%"))
+```
+
+```{r}
+#| label: fig-t2-boot
+#| fig-cap: "Bootstrap distribution of the difference in median budget. Solid line: observed difference. Dashed lines: 95% interval."
+#| fig-height: 3
 #| fig-width: 7
 bootstrap_results |>
   ggplot(aes(x = boot_diff)) +
   geom_histogram(bins = 40, colour = "white") +
   geom_vline(xintercept = obs_diff) +
-  geom_vline(
-    xintercept = quantile(bootstrap_results$boot_diff, c(0.025, 0.975)),
-    linetype = "dashed"
-  ) +
-  labs(
-    title = "Bootstrap distribution of the difference in median budget",
-    x = "Franchise median minus Original median (USD millions)",
-    y = "Count"
-  ) +
+  geom_vline(xintercept = ci, linetype = "dashed") +
+  scale_x_continuous(labels = ~ paste0("$", .x / 1e6, "M")) +
+  labs(x = "Franchise median minus Original median", y = "Count") +
   theme_minimal()
 ```
 
+The observed difference in median budget is \$`r round(obs_diff / 1e6, 1)`M, and the 95% interval runs from \$`r round(ci[1] / 1e6, 1)`M to \$`r round(ci[2] / 1e6, 1)`M (@tbl-t2-ci, @fig-t2-boot). The interval does not include zero, so the typical Franchise budget is higher than the typical Original budget.
+
+### 3. Does this support leadership's concern?
+
 ```{r}
-#| label: t2-concern
-# Does the data support leadership's concern?
+#| label: tbl-t2-concern
+#| tbl-cap: "Share of films and budget, and proportion of low and high budgets, by franchise status"
 t2 |>
   group_by(franchise_status) |>
   summarise(
     n_films = n(),
     share_of_films = n() / nrow(t2),
-    share_of_budget = sum(budget_m) / sum(t2$budget_m),
-    prop_under_10M = mean(budget_m < 10),
-    prop_over_100M = mean(budget_m > 100)
+    share_of_budget = sum(budget) / sum(t2$budget),
+    under_10M = mean(budget < 10e6),
+    over_100M = mean(budget > 100e6)
   ) |>
-  mutate(across(share_of_films:prop_over_100M, ~ round(.x, 3)))
+  mutate(across(share_of_films:over_100M, ~ round(.x, 3))) |>
+  knitr::kable(col.names = c("Franchise status", "Films", "Share of films", "Share of budget",
+                             "Under $10M", "Over $100M"))
+```
 
+```{r}
+#| label: tbl-t2-revenue
+#| tbl-cap: "Share of total revenue by franchise status (films with revenue recorded)"
 movies |>
-  filter(revenue > 0, !is.na(franchise_status)) |>
+  filter(!is.na(revenue), !is.na(franchise_status)) |>
   group_by(franchise_status) |>
   summarise(total_revenue = sum(revenue)) |>
-  mutate(share_of_revenue = round(total_revenue / sum(total_revenue), 3))
+  mutate(share_of_revenue = round(total_revenue / sum(total_revenue), 3)) |>
+  knitr::kable(col.names = c("Franchise status", "Total revenue", "Share of revenue"))
 ```
+
+Leadership's concern is only partly supported. Franchise films do indeed have larger budget per movie, where 22% of them have a budget higher than \$100M whereas only 6.5% of Originals do that (@tbl-t2-concern). However, Originals are not primarily small movies because 27% of them have budgets less than \$10M. Franchise films represent 6% of films, have 10% of budget (@tbl-t2-concern) and 14% of revenue (@tbl-t2-revenue), so Originals provide most of both expenses and income. It is an observation, so it only reveals budget gap without providing evidence on causation. Moreover, 23% of Originals do not have their budget specified at all compared to 10% of Franchise films (@tbl-t2-missing), so the actual gap may be even larger.
+
+### 4. Investment advice
+
+The data doesn't indicate that Originals are constrained by smaller budgets. This is the optimal approach: keep a few high-budget Franchise movies and increase the number of mid-budget Originals instead of considering Originals as small investments. The only problem to look out for is the extremely high Franchise budgets, because a couple of movies can affect the whole slate negatively. It doesn't say anything about return on investment, and so the optimal mix will include the results from Tasks 3 and 4.
+
+### Summary for the Head of Production
+
+We compared Franchise and Original budgets using the median, which is not affected by some very costly movies. An average Franchise movie had an estimated budget of \$40M while an average Original had an estimated budget of \$22M. With 95% confidence we estimate that the real difference lies in the interval from \$9M to \$26M.. Franchise movies have higher budget on average but there is significant overlap between the two distributions, Original movies are not mostly low-budget movies, and Franchise movies represent only 10% of the total budget. We recommend maintaining some Franchise movies and developing mid-budget Originals.
