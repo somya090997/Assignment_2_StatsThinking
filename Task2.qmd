@@ -53,10 +53,11 @@ movies |>
 
 ```{r}
 
-#| label: fig-t2-plot
+#| label: fig-t2plot
 #| fig-cap: "Budget distributions by franchise status (log scale, axis labelled in dollars)"
 #| fig-height: 4
 #| fig-width: 8
+#| output: true
 ggplot(t2, aes(x = budget, fill = franchise_status)) +
   geom_density(alpha = 0.4) +
   scale_x_log10(
@@ -78,6 +79,7 @@ ggplot(t2, aes(x = budget, fill = franchise_status)) +
 #| fig-cap: "Budget by franchise status (log scale). The line in each box is the median."
 #| fig-height: 3
 #| fig-width: 8
+#| output: true
 ggplot(t2, aes(x = budget, y = franchise_status)) +
   geom_boxplot() +
   scale_x_log10(
@@ -88,7 +90,7 @@ ggplot(t2, aes(x = budget, y = franchise_status)) +
   theme_minimal()
 ```
 
-Both are positively skewed (@fig-t2-plot); most movies have low budgets, with a few having extremely high budgets, so the median will provide a good estimate of a typical movie rather than the mean. @tbl-t2-summary indicates a median budget of \$40M for Franchises compared to \$22M for Originals, and this can be seen in @fig-t2-box. The two categories overlap significantly, hence many movies from Originals are expensive than many movies from Franchises. A log scale is used because we want to see the majority of the movies, and real values are shown in @tbl-t2-summary.
+Both are positively skewed (fig-t2plot); most movies have low budgets, with a few having extremely high budgets, so the median will provide a good estimate of a typical movie rather than the mean. @tbl-t2-summary indicates a median budget of \$40M for Franchises compared to \$22M for Originals, and this can be seen in @fig-t2-box. The two categories overlap significantly, hence many movies from Originals are expensive than many movies from Franchises. A log scale is used because we want to see the majority of the movies, and real values are shown in @tbl-t2-summary.
 
 ### 2. Interval estimate for the difference in median budget
 

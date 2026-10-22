@@ -329,7 +329,63 @@ movies_clean |>
   theme(legend.position = "none")
 ```
 
-The Head of Production should consider these differences when evaluating opportunities to develop new original projects or invest in franchise films. However, the percentages describe the composition of the slate rather than financial success, so they should be considered alongside budget and ROI results before making investment decisions.
+```{r}
+movies_clean |>
+  filter(!is.na(primary_genre), primary_genre != "TV Movie") |>
+  add_count(primary_genre, name = "movie_count") |>
+  filter(movie_count > 250) |>
+  group_by(primary_genre, franchise_status) |>
+  summarise(n = n(), .groups = "drop") |>
+  group_by(primary_genre) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = franchise_status, y = pct, fill = franchise_status)) +
+  geom_col(width = 0.6) +
+  geom_text(
+    aes(label = paste0(round(pct, 1), "%")),
+    vjust = -0.4, size = 3
+  ) +
+  scale_fill_manual(
+    values = c(Original = "#5B8DB8", Franchise = "#E07B54")
+  ) +
+  facet_wrap(~primary_genre, ncol = 3) +
+  labs(
+    title = "Franchise vs. Original: Genres with More Than 250 Movies",
+    x = NULL,
+    y = "Percentage within genre"
+  ) +
+  coord_cartesian(ylim = c(0, 110)) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+```{r}
+movies_clean |>
+  filter(!is.na(primary_genre), primary_genre != "TV Movie") |>
+  add_count(primary_genre, name = "movie_count") |>
+  filter(movie_count <= 250) |>
+  group_by(primary_genre, franchise_status) |>
+  summarise(n = n(), .groups = "drop") |>
+  group_by(primary_genre) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = franchise_status, y = pct, fill = franchise_status)) +
+  geom_col(width = 0.6) +
+  geom_text(
+    aes(label = paste0(round(pct, 1), "%")),
+    vjust = -0.4, size = 3
+  ) +
+  scale_fill_manual(
+    values = c(Original = "#5B8DB8", Franchise = "#E07B54")
+  ) +
+  facet_wrap(~primary_genre, ncol = 3) +
+  labs(
+    title = "Franchise vs. Original: Genres with 250 or Fewer Movies",
+    x = NULL,
+    y = "Percentage within genre"
+  ) +
+  coord_cartesian(ylim = c(0, 110)) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
 
 ## Slate Trends Over Time (2000–2016) 
 
@@ -380,14 +436,13 @@ trend_summary |>
   scale_x_continuous(breaks = seq(2000, 2016, 4))
 ```
 
-Overall, the slate shows a shift towards more franchise films and higher revenue relative to production budgets, despite lower median budgets. However, these trends do not prove that increased franchise production caused the improvement in ROI.
-
+The Head of Production should consider these differences when evaluating opportunities to develop new original projects or invest in franchise films. However, the percentages describe the composition of the slate rather than financial success, so they should be considered alongside budget and ROI results before making investment decisions.
 
 
 ## Summary for the Head of Production
 
-The overall production budget distribution is positively skewed, with most films having relatively low budgets and a small number requiring substantially higher investment. Budget distributions vary across genres, with Action and Adventure showing wider ranges. The genre comparisons also show that most films are originals, accounting for 94.6% of the slate, while franchises represent only 5.4%. However, franchise representation varies by genre, with Horror having the highest franchise share among genres with more than 250 films (15.7%), and Science Fiction having the highest share among lower-volume genres (14.6%).
+The overall budget distribution is positively skewed, with most films having lower budgets. Action and Adventure show wider budget ranges. Originals account for 94.6% of films, while franchises represent 5.4%. Horror has the highest franchise share among genres with over 250 films (15.7%), while Science Fiction leads among lower-volume genres (14.6%).
 
-ROI distributions vary across genres, with some films generating revenue well above their production budgets and others performing below break-even. From 2000 to 2016, the median ROI generally increased after 2010, reaching approximately 2.9 in 2016. Over the same period, median production budgets generally declined before a modest recovery, while franchise share rose to approximately 16% by 2016. These trends suggest improved revenue relative to production budgets alongside a growing franchise presence, although they do not establish a causal relationship.
+ROI varies across genres, with some films earning well above their production budgets. From 2000 to 2016, median ROI generally increased after 2010, reaching approximately 2.9 in 2016. Median budgets declined before recovering slightly, while franchise share rose to around 16%.
 
-Before analysis, zero budgets and revenues were treated as missing values, and blank text values were converted to NA. Movies with missing, zero or negative budgets and records with missing genres were excluded from relevant plots, while the original dataset was retained. These data quality issues may affect the number of observations available for each analysis. The Head of Production should consider budget levels, genre composition, ROI and franchise representation together when planning future productions, rather than relying on any single measure.
+Zero budgets and revenues were treated as missing, and blank text values were converted to NA. Records with invalid budgets or missing genres were excluded from relevant plots, but the original dataset was retained. These limitations should be considered when using budget, ROI, genre and franchise trends to guide production decisions.
