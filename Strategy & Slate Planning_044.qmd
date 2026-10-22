@@ -1,0 +1,258 @@
+---
+title: "Strategy & Slate Planning_044"
+author: "Somya, Shravani, Urvi"
+format:
+  html:
+    toc: true
+    number-sections: true
+    code-fold: true
+    embed-resources: true
+
+  typst:
+    toc: true
+    number-sections: true
+    papersize: a4
+    margin:
+      x: 0.7in
+      y: 0.7in
+    fontsize: 8pt
+    code:
+      font-size: 8pt
+
+execute:
+  echo: true
+  warning: false
+  message: false
+
+---
+
+### Task 1 – Slate Health Check
+
+
+```{r}
+#| warning: false
+#| message: false
+
+library(tidyverse)
+library(gt)
+
+movies <- read.csv("data/movies.csv", stringsAsFactors = FALSE)
+
+movies_clean <- movies |>
+  mutate(
+    budget = if_else(budget == 0, NA_real_, as.numeric(budget)),
+    revenue = if_else(revenue == 0, NA_real_, as.numeric(revenue)),
+    roi = revenue / budget,
+    budget_m = budget / 1e6,
+    franchise_status = factor(
+      franchise_status,
+      levels = c("Original", "Franchise")
+    )
+  )
+
+movies |>
+  distinct(primary_genre) |>
+  arrange(primary_genre)
+
+
+```
+
+Data Cleaning
+
+Before any analysis was conducted, missing-data placeholders were identified and replaced with NA rather than removed. Per the variable dictionary, budget values of exactly $0 or below $10,000 are placeholder entries, and revenue values of $0 indicate missing box-office data. Rather than dropping these rows entirely, the affected values were converted to NA, retaining all 3,426 films in the five focus genres. Rows with NA budget or revenue are excluded automatically by R when calculating financial summaries and plots, but are retained for analyses such as franchise composition that do not require financial data.
+
+###   Summary tables
+
+```{r}
+#| output: true
+# Budget
+movies_clean |>
+  summarise(
+    n      = sum(!is.na(budget_m)),
+    mean   = round(mean(budget_m,            na.rm = TRUE), 1),
+    median = round(median(budget_m,          na.rm = TRUE), 1),
+    sd     = round(sd(budget_m,              na.rm = TRUE), 1),
+    Q1     = round(quantile(budget_m, 0.25,  na.rm = TRUE), 1),
+    Q3     = round(quantile(budget_m, 0.75,  na.rm = TRUE), 1),
+    max    = round(max(budget_m,             na.rm = TRUE), 0)
+  ) |>
+  gt() |>
+  tab_header(
+    title = "Summary Statistics for Movie Budgets"
+  )
+
+# ROI
+movies_clean |>
+  summarise(
+    n      = sum(!is.na(roi)),
+    mean   = round(mean(roi,            na.rm = TRUE), 2),
+    median = round(median(roi,          na.rm = TRUE), 2),
+    sd     = round(sd(roi,              na.rm = TRUE), 2),
+    Q1     = round(quantile(roi, 0.25,  na.rm = TRUE), 2),
+    Q3     = round(quantile(roi, 0.75,  na.rm = TRUE), 2),
+    max    = round(max(roi,             na.rm = TRUE), 0)
+  ) |>
+  gt() |>
+  tab_header(
+    title = "Summary Statistics for Return on Investment (ROI)"
+  )
+```
+
+The typical film cost \$25M to produce (median budget) and returned 2.3x its budget at the box office (median ROI). The mean ROI of 13.6x is not a reliable benchmark — it is driven almost entirely by a handful of micro-budget Horror films with extreme returns, most notably Paranormal Activity (\~12,890x ROI). Franchise films represent just 7% of the historical slate, with Originals making up the remaining 93%.
+
+
+## Overall Production Budget Distribution
+
+@fig-overall shows a positively skewed distribution of production budgets. Most films have budgets below $50 million, with the highest concentration between approximately $10 million and $50 million. The number of films decreases as budgets increase, although a small number of films have budgets exceeding $150 million, with a few reaching above $250 million.
+
+This suggests that high production budgets are relatively uncommon, while most films are produced with more modest budgets. The Head of Production should consider this skewed distribution when planning future budgets, as a small number of high-budget films may influence the overall mean.
+
+```{r}
+#| label: fig-overall
+#| fig-cap: "Overall production budget distribution across all genres."
+#| output: true
+
+# Overall budget distribution
+
+budget_plot_data <- movies_clean |>
+  filter(
+    !is.na(budget),
+    budget > 0
+  ) |>
+  mutate(budget_m = budget / 1e6)
+
+# Plot overall budget distribution
+ggplot(budget_plot_data, aes(x = budget_m)) +
+  geom_histogram(
+    bins = 30,
+    fill = "steelblue",
+    colour = "white"
+  ) +
+  labs(
+    title = "Overall Production Budget Distribution",
+    x = "Production Budget ($ millions)",
+    y = "Number of Movies"
+  ) +
+  theme_minimal()
+
+
+
+```
+Overall, the graphs show differences in budget distribution across genres and highlight potential high-budget outliers. The Head of Production should consider these patterns when planning budgets, alongside ROI and franchise/original status, as budget size alone does not indicate profitability.
+
+## ROI distribution (Overall and by genre)
+
+In @fig-overall-roi distribution is concentrated around a revenue-to-budget ratio of approximately 1, with a right-skewed tail extending towards much higher values. The red dashed line represents the median ROI, while the break-even point is ROI = 1. Most films have ratios relatively close to the central range, but a small number achieve exceptionally high revenue relative to their production budgets.
+
+```{r}
+#| label: fig-overall-roi
+#| fig-cap: "Overall distribution of revenue-to-budget ratios across the selected genres."
+#| output: true
+
+ggplot(movies_clean, aes(x = roi + 0.01)) +
+  geom_histogram(bins = 35, fill = "#6BAE75", colour = "white") +
+  scale_x_log10() +
+  geom_vline(
+    xintercept = median(movies_clean$roi, na.rm = TRUE) + 0.01,
+    colour = "#C9485B",
+    linewidth = 1,
+    linetype = "dashed"
+  ) +
+  labs(
+    title = "Overall ROI Distribution Across All Genres",
+    subtitle = "Red dashed line = median ROI; break-even at ROI = 1",
+    x = "ROI (log10 scale)",
+    y = "Number of Movies"
+  ) +
+  theme_minimal()
+```
+
+## Franchise and Original Film Composition
+
+The overall slate is dominated by original films, which account for 94.6% of films, while franchises represent only 5.4%. This indicates that the historical slate relies mainly on standalone productions rather than established franchises.
+
+```{r}
+#| output: true
+
+# Overall franchise bar
+movies_clean |>
+  count(franchise_status) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = franchise_status, y = pct, fill = franchise_status)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = paste0(round(pct, 1), "%")),
+            vjust = -0.4, size = 4) +
+  scale_fill_manual(values = c(Original = "#5B8DB8", Franchise = "#E07B54")) +
+  labs(
+    title = "Overall Slate Composition",
+    x     = NULL,
+    y     = "% of films"
+  ) +
+  ylim(0, 105) +
+  theme(legend.position = "none")
+```
+Across genres with more than 250 movies, original films dominate every genre. Drama has the highest proportion of original films at 98.8%, followed by Comedy at 95.6%. Horror has the largest franchise share in this group at 15.7%, followed by Action at 9.2% and Adventure at 7.7%.
+
+## Slate Trends Over Time (2000–2016) 
+
+Franchise films make up 7% of the overall slate. Horror (21%) and Action (11%) have the highest franchise concentration; Drama sits lowest at just 1%.
+
+
+```{r}
+trend_summary <- movies_clean |>
+  filter(release_year >= 2000, release_year <= 2016) |>
+  group_by(release_year) |>
+  summarise(
+    n_films       = n(),
+    median_budget = median(budget_m,  na.rm = TRUE),
+    median_roi    = median(roi,        na.rm = TRUE),
+    pct_franchise = sum(franchise_status == "Franchise") / n() * 100,
+    .groups       = "drop"
+  )
+```
+
+
+Franchise share increased towards 2016, reaching approximately 16%. Median production budgets generally declined from around $33 million in 2000 to $22 million in 2014–2015, before recovering slightly. In contrast, median ROI increased after 2010, reaching approximately 2.9 in 2016.
+
+```{r}
+#| output: true
+
+trend_summary |>
+  pivot_longer(
+    cols      = c(median_budget, median_roi, pct_franchise),
+    names_to  = "metric",
+    values_to = "value"
+  ) |>
+  mutate(metric = recode(metric,
+    median_budget  = "Median Budget (USD millions)",
+    median_roi     = "Median ROI",
+    pct_franchise  = "Franchise Share (%)"
+  )) |>
+  ggplot(aes(x = release_year, y = value)) +
+  geom_line(colour = "#5B8DB8", linewidth = 0.9) +
+  geom_point(colour = "#5B8DB8", size = 1.8) +
+  geom_smooth(method = "loess", se = FALSE,
+              colour = "#C9485B", linewidth = 0.9, linetype = "dashed") +
+  facet_wrap(~ metric, ncol = 1, scales = "free_y") +
+  labs(
+    title    = "Slate Trends Over Time (2000–2016)",
+    subtitle = "Red dashed = LOESS trend",
+    x        = "Release Year",
+    y        = NULL
+  ) +
+  scale_x_continuous(breaks = seq(2000, 2016, 4))
+```
+
+Overall, the slate shows a shift towards more franchise films and higher revenue relative to production budgets, despite lower median budgets. However, these trends do not prove that increased franchise production caused the improvement in ROI.
+
+
+
+## Summary for the Head of Production
+
+The overall production budget distribution is positively skewed, with most films having relatively low budgets and a small number requiring substantially higher investment. Budget distributions vary across genres, with Action and Adventure showing wider ranges. The genre comparisons also show that most films are originals, accounting for 94.6% of the slate, while franchises represent only 5.4%. However, franchise representation varies by genre, with Horror having the highest franchise share among genres with more than 250 films (15.7%), and Science Fiction having the highest share among lower-volume genres (14.6%).
+
+ROI distributions vary across genres, with some films generating revenue well above their production budgets and others performing below break-even. From 2000 to 2016, the median ROI generally increased after 2010, reaching approximately 2.9 in 2016. Over the same period, median production budgets generally declined before a modest recovery, while franchise share rose to approximately 16% by 2016. These trends suggest improved revenue relative to production budgets alongside a growing franchise presence, although they do not establish a causal relationship.
+
+Before analysis, zero budgets and revenues were treated as missing values, and blank text values were converted to NA. Movies with missing, zero or negative budgets and records with missing genres were excluded from relevant plots, while the original dataset was retained. These data quality issues may affect the number of observations available for each analysis. The Head of Production should consider budget levels, genre composition, ROI and franchise representation together when planning future productions, rather than relying on any single measure.
+
+

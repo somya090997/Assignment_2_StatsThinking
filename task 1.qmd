@@ -328,68 +328,7 @@ movies_clean |>
   ylim(0, 105) +
   theme(legend.position = "none")
 ```
-Across genres with more than 250 movies, original films dominate every genre. Drama has the highest proportion of original films at 98.8%, followed by Comedy at 95.6%. Horror has the largest franchise share in this group at 15.7%, followed by Action at 9.2% and Adventure at 7.7%.
 
-```{r}
-
-movies_clean |>
-  filter(!is.na(primary_genre), primary_genre != "TV Movie") |>
-  add_count(primary_genre, name = "movie_count") |>
-  filter(movie_count > 250) |>
-  group_by(primary_genre, franchise_status) |>
-  summarise(n = n(), .groups = "drop") |>
-  group_by(primary_genre) |>
-  mutate(pct = n / sum(n) * 100) |>
-  ggplot(aes(x = franchise_status, y = pct, fill = franchise_status)) +
-  geom_col(width = 0.6) +
-  geom_text(
-    aes(label = paste0(round(pct, 1), "%")),
-    vjust = -0.4, size = 3
-  ) +
-  scale_fill_manual(
-    values = c(Original = "#5B8DB8", Franchise = "#E07B54")
-  ) +
-  facet_wrap(~primary_genre, ncol = 3) +
-  labs(
-    title = "Franchise vs. Original: Genres with More Than 250 Movies",
-    x = NULL,
-    y = "Percentage within genre"
-  ) +
-  coord_cartesian(ylim = c(0, 110)) +
-  theme_minimal() +
-  theme(legend.position = "none")
-```
-
-The same pattern appears among genres with 250 or fewer movies, where original films remain the majority. Science Fiction has the largest franchise share at 14.6%, followed by Animation at 8.9% and War at 8.3%. In contrast, Documentary and History consist entirely of original films in the displayed data, while Romance has a franchise share of only 0.9%.
-
-```{r}
-movies_clean |>
-  filter(!is.na(primary_genre), primary_genre != "TV Movie") |>
-  add_count(primary_genre, name = "movie_count") |>
-  filter(movie_count <= 250) |>
-  group_by(primary_genre, franchise_status) |>
-  summarise(n = n(), .groups = "drop") |>
-  group_by(primary_genre) |>
-  mutate(pct = n / sum(n) * 100) |>
-  ggplot(aes(x = franchise_status, y = pct, fill = franchise_status)) +
-  geom_col(width = 0.6) +
-  geom_text(
-    aes(label = paste0(round(pct, 1), "%")),
-    vjust = -0.4, size = 3
-  ) +
-  scale_fill_manual(
-    values = c(Original = "#5B8DB8", Franchise = "#E07B54")
-  ) +
-  facet_wrap(~primary_genre, ncol = 3) +
-  labs(
-    title = "Franchise vs. Original: Genres with 250 or Fewer Movies",
-    x = NULL,
-    y = "Percentage within genre"
-  ) +
-  coord_cartesian(ylim = c(0, 110)) +
-  theme_minimal() +
-  theme(legend.position = "none")
-```
 The Head of Production should consider these differences when evaluating opportunities to develop new original projects or invest in franchise films. However, the percentages describe the composition of the slate rather than financial success, so they should be considered alongside budget and ROI results before making investment decisions.
 
 ## Slate Trends Over Time (2000–2016) 
@@ -407,7 +346,8 @@ trend_summary <- movies_clean |>
     median_roi    = median(roi,        na.rm = TRUE),
     pct_franchise = sum(franchise_status == "Franchise") / n() * 100,
     .groups       = "drop"
-  )
+  ) |> gt() |> 
+  
 ```
 
 
