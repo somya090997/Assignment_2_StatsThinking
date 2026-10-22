@@ -20,10 +20,11 @@ format:
       font-size: 8pt
 
 execute:
-  echo: true
+  echo: false
   warning: false
   message: false
-
+  output: false
+  error: false
 ---
 
 ### Task 1 – Slate Health Check
