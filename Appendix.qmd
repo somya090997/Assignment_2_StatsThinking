@@ -1,0 +1,90 @@
+---
+title: "Appendix"
+format: html
+---
+
+# Appendix
+
+### Group Collaboration and Contribution Report
+
+This appendix documents the allocation of tasks, group meetings, individual contributions and cross-review process undertaken to complete the assignment. It provides evidence of collaboration and quality assurance throughout the project.
+
+::: {.callout-note appearance="minimal"}
+**Group number:** [Enter group number]
+
+**Group members:** [Member 1], [Member 2], [Member 3], [Member 4]
+
+**Link to Collaboration:** [Access the group's Teams page](https://tinyurl.com/p49s2bnh), [Git Hub Repo](https://github.com/somya090997/Assignment_2_StatsThinking)
+:::
+
+## 1. Task allocation
+
+Tasks were allocated among group members to ensure that each component of the assignment was completed and reviewed.
+
+- **Task 1**
+  - Analyst: Urvi
+  - Reviewer: Shravani
+
+- **Task 2**
+  - Analyst: Shravani
+  - Reviewer: Somya
+
+- **Task 3**
+  - Analyst: Somya
+  - Reviewer: Urvi
+
+- **Task 4**
+  - Part A: Urvi
+  - Part B: Somya
+  - Part C: Shravani
+  - Part D: All group members
+
+## 2. Meeting schedule
+
+The group held meetings to discuss assignment requirements, review progress, resolve issues and finalise the report.
+
+- **Meeting 1**
+  - Date: 27 September 2026, Venue: In person
+  - Purpose: Discuss the assignment requirements, allocate tasks and agree on the analysis approach.
+
+- **Meeting 2**
+  - Date: 16 October 2026, Venue: WhatsApp call
+  - Purpose: Review progress, discuss analytical findings and resolve coding issues.
+
+- **Meeting 3**
+  - Date: 23 October 2026 , Venue: In person
+  - Purpose: Cross-review completed tasks, integrate feedback and finalise the report.
+
+## 3. Individual contribution summary
+
+The following summarises each member's contributions and approximate time spent on the assignment.
+
+- **Shravani — 5 hours**
+  - Completed Task 2 and Part C of Task 4.
+  - Reviewed Urvi's work.
+
+- **Urvi — 7 hours**
+  - Completed Task 1 and Part A of Task 4.
+  - Reviewed Somya's work.
+
+- **Somya — 15 hours**
+  - Completed Task 3 and Part B of Task 4.
+  - Reviewed Shravani's work.
+  - Created the appendix and completed the final report compilation.
+
+## 4. Cross-review and feedback
+
+Kindly find the link to our Feedback Excel sheet [Excel Sheet](https://docs.google.com/spreadsheets/d/1nN1kW32ARDn_fQGwqGuT7rS4uwQsZoHX/edit?usp=sharing&ouid=103583701831509672418&rtpof=true&sd=true)
+
+## 5. Final quality assurance
+
+Before submission, the group reviewed the final report to ensure consistency, accuracy and reproducibility.
+
+- Reviewed code and verified calculations.
+- Checked the interpretation of results.
+- Checked figures, headings and cross-references.
+- Ensured the Quarto document rendered successfully.
+- Reviewed formatting and presentation.
+- Documented individual contributions and peer-review activities.
+
+**Group confirmation:** This appendix summarises the group's task allocation, meetings, individual contributions and review process.

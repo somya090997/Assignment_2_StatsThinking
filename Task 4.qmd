@@ -14,6 +14,9 @@ A film is defined as a **flop** if it fails to recoup its production budget at t
 #| message: false
 
 library(tidyverse)
+library(broom)
+library(brms)
+library(broom.mixed)
 
 movies <- read.csv("data/movies.csv", stringsAsFactors = FALSE)
 
@@ -29,6 +32,17 @@ movies_clean <- movies |>
     franchise_status = factor(franchise_status,
                               levels = c("Original", "Franchise"))
   )
+
+genre_focus <- c(
+  "Action",
+  "Comedy",
+  "Drama",
+  "Horror",
+  "Animation"
+)
+
+movies_model2 <- movies_clean |>
+  filter(primary_genre %in% genre_focus)
 
 movies_model <- movies_clean |>
   filter(!is.na(roi)) |>
@@ -56,3 +70,210 @@ movies_model |>
 We are using logistic regression because we want to predict whether a film will flop or not. Since there are only two possible outcomes, this is a binary classification problem. Linear regression is not ideal because it is designed to predict continuous values and can produce results outside the 0 to 1 range. Poisson regression is mainly used for predicting counts, such as the number of events that occur.
 
 Logistic regression is a better fit because it predicts the probability of a film flopping, with values always between 0 and 1. It also helps us understand how different factors influence the chances of a flop. For example, we can compare franchise films with original films while keeping genre and budget constant. This gives the Head of Production useful insights to make more informed decisions about which films to greenlight.
+
+
+# Trying another method
+
+```{r}
+# Check available columns
+names(movies_clean)
+
+# Check the dataset size
+dim(movies_clean)
+
+# Check the outcome distribution
+movies_clean |>
+  summarise(
+    total_movies = n(),
+    flops = sum(roi < 1, na.rm = TRUE),
+    non_flops = sum(roi >= 1, na.rm = TRUE),
+    missing_roi = sum(is.na(roi))
+  )
+
+# Find potential crew-related variables
+names(movies_clean)[
+  grepl("cast|crew|actor", names(movies_clean), ignore.case = TRUE)
+]
+```
+
+#creating the dataset
+
+```{r}
+# Create the modelling dataset
+movies_model2<- movies_clean |>
+  mutate(
+    flop = if_else(
+      roi < 1,
+      1L,
+      0L,
+      missing = NA_integer_
+    ),
+    log_budget = log(budget)
+  ) |>
+  filter(
+    !is.na(flop),
+    !is.na(primary_genre),
+    !is.na(franchise_status),
+    !is.na(log_budget),
+    is.finite(log_budget),
+    !is.na(cast_size)
+  )
+```
+
+```{r}
+# Check the number of observations
+nrow(movies_model)
+
+# Check the flop distribution
+movies_model2 |>
+  count(flop) |>
+  mutate(percentage = n / sum(n) * 100)
+
+# Check missing values in model variables
+movies_model2 |>
+  summarise(
+    missing_flop = sum(is.na(flop)),
+    missing_budget = sum(is.na(log_budget)),
+    missing_cast = sum(is.na(cast_size))
+  )
+```
+
+
+Action was selected as the reference genre because its downside risk was examined in the earlier analysis.
+
+```{r}
+
+movies_model2 <- movies_model2 |>
+  mutate(
+    primary_genre = relevel(
+      factor(primary_genre),
+      ref = "Action"
+    )
+  )
+
+model_freq <- glm(
+  flop ~ primary_genre +
+    franchise_status +
+    log_budget +
+    cast_size,
+  data = movies_model2,
+  family = binomial(link = "logit")
+)
+```
+
+```{r}
+exp(coef(model_freq))
+exp(confint(model_freq))
+```
+```{r}
+results <- broom::tidy(
+  model_freq,
+  conf.int = TRUE,
+  exponentiate = TRUE
+) |>
+  dplyr::select(
+    term,
+    estimate,
+    conf.low,
+    conf.high,
+    p.value
+  ) |>
+  dplyr::rename(
+    Predictor = term,
+    `Odds Ratio` = estimate,
+    `95% CI Lower` = conf.low,
+    `95% CI Upper` = conf.high,
+    `P-value` = p.value
+  ) 
+
+results |>
+  gt() |>
+  fmt_number(
+    columns = c(`Odds Ratio`, `95% CI Lower`, `95% CI Upper`, `P-value`),
+    decimals = 3
+  ) |>
+  tab_header(
+    title = "Frequentist Logistic Regression Results",
+    subtitle = "Odds Ratios and 95% Confidence Intervals"
+  )
+
+```
+
+
+```{r}
+
+install.packages("rstanarm")
+library(rstanarm)
+
+
+bayesian_model <- stan_glm(
+  flop ~ primary_genre +
+    franchise_status +
+    log_budget +
+    cast_size,
+  data = movies_model2,
+  family = binomial(link = "logit"),
+  prior = normal(location = 0, scale = 2.5, autoscale = FALSE),
+  prior_intercept = normal(location = 0, scale = 2.5, autoscale = FALSE),
+  chains = 4,
+  iter = 4000,
+  seed = 123,
+  refresh = 500
+)
+
+print(bayesian_model, digits = 3)
+
+```
+```{r}
+#checking odd ratio for Bayesian
+posterior_draws <- as.matrix(bayesian_model)
+
+bayes_or <- exp(
+  posterior::summarise_draws(
+    posterior::as_draws_matrix(bayesian_model)
+  )$median
+)
+
+
+tidy(
+  bayesian_model,
+  effects = "fixed",
+  conf.int = TRUE,
+  conf.level = 0.95
+) |>
+  mutate(
+    `Odds Ratio` = exp(estimate),
+    `Lower 95% CrI` = exp(conf.low),
+    `Upper 95% CrI` = exp(conf.high)
+  ) |>
+  dplyr::select(
+    term,
+    `Odds Ratio`,
+    `Lower 95% CrI`,
+    `Upper 95% CrI`
+  ) |>
+  gt() |>
+  fmt_number(
+    columns = c(
+      `Odds Ratio`,
+      `Lower 95% CrI`,
+      `Upper 95% CrI`
+    ),
+    decimals = 3
+  ) |>
+  cols_label(
+    term = "Predictor"
+  ) |>
+  tab_header(
+    title = "Bayesian Logistic Regression",
+    subtitle = "Odds Ratios and 95% Credible Intervals"
+  )
+```
+
+```{r}
+draws <- as.matrix(bayesian_model)
+
+mean(draws[, "franchise_statusFranchise"] < 0)
+```
+
+
