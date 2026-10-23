@@ -1,0 +1,1867 @@
+---
+title: "Strategy & Slate Planning_044"
+author: "Somya, Shravani, Urvi"
+
+format:
+  html:
+    toc: true
+    number-sections: true
+    code-fold: true
+    embed-resources: true
+
+  typst:
+    toc: true
+    number-sections: true
+    papersize: a4
+    margin:
+      x: 0.55in
+      y: 0.5in
+    fontsize: 9pt
+    linestretch: 1.0
+    include-in-header: typst-header.typ
+
+execute:
+  echo: false
+  warning: false
+  message: false
+  output: false
+  error: false
+  fig-width: 5
+  fig-height: 3
+  fig-align: center
+  out-width: 80%
+---
+
+### Task 1 – Slate Health Check
+
+
+```{r}
+#| warning: false
+#| message: false
+
+library(dplyr)
+library(tidyverse)
+library(MASS)
+library(ggplot2)
+library(gt)
+library(patchwork)
+library(broom)
+library(brms)
+library(broom.mixed)
+library(rstanarm)
+library (rsample)
+library(performance)
+
+
+movies <- read.csv("data/movies.csv", stringsAsFactors = FALSE)
+
+genre_focus <- c(
+  "Action",
+  "Comedy",
+  "Drama",
+  "Horror",
+  "Animation"
+)
+
+movies_clean <- movies |>
+  mutate(
+    budget = if_else(budget == 0, NA_real_, as.numeric(budget)),
+    revenue = if_else(revenue == 0, NA_real_, as.numeric(revenue)),
+    roi = revenue / budget,
+    budget_m = budget / 1e6,
+    franchise_status = factor(
+      franchise_status,
+      levels = c("Original", "Franchise")
+    )
+  )
+
+focus_genre_movies <- movies_clean |>
+  filter(primary_genre %in% genre_focus)
+
+```
+
+Data Cleaning
+
+Before any analysis was conducted, missing-data placeholders were identified and replaced with NA rather than removed. Per the variable dictionary, budget values of exactly $0 or below $10,000 are placeholder entries, and revenue values of $0 indicate missing box-office data. Rather than dropping these rows entirely, the affected values were converted to NA, retaining all 3,426 films in the five focus genres. Rows with NA budget or revenue are excluded automatically by R when calculating financial summaries and plots, but are retained for analyses such as franchise composition that do not require financial data.
+
+###   Summary tables
+
+```{r}
+#| output: true
+# Budget
+movies_clean |>
+  summarise(
+    n      = sum(!is.na(budget_m)),
+    mean   = round(mean(budget_m,            na.rm = TRUE), 1),
+    median = round(median(budget_m,          na.rm = TRUE), 1),
+    sd     = round(sd(budget_m,              na.rm = TRUE), 1),
+    Q1     = round(quantile(budget_m, 0.25,  na.rm = TRUE), 1),
+    Q3     = round(quantile(budget_m, 0.75,  na.rm = TRUE), 1),
+    max    = round(max(budget_m,             na.rm = TRUE), 0)
+  ) |>
+  gt() |>
+  tab_header(
+    title = "Summary Statistics for Movie Budgets"
+  )
+
+# ROI
+movies_clean |>
+  summarise(
+    n      = sum(!is.na(roi)),
+    mean   = round(mean(roi,            na.rm = TRUE), 2),
+    median = round(median(roi,          na.rm = TRUE), 2),
+    sd     = round(sd(roi,              na.rm = TRUE), 2),
+    Q1     = round(quantile(roi, 0.25,  na.rm = TRUE), 2),
+    Q3     = round(quantile(roi, 0.75,  na.rm = TRUE), 2),
+    max    = round(max(roi,             na.rm = TRUE), 0)
+  ) |>
+  gt() |>
+  tab_header(
+    title = "Summary Statistics for Return on Investment (ROI)"
+  )
+```
+
+The typical film cost \$25M to produce (median budget) and returned 2.3x its budget at the box office (median ROI). The mean ROI of 13.6x is not a reliable benchmark — it is driven almost entirely by a handful of micro-budget Horror films with extreme returns, most notably Paranormal Activity (\~12,890x ROI). Franchise films represent just 7% of the historical slate, with Originals making up the remaining 93%.
+
+**Note: To make visualisation clear, the genres are divided into categories, with a standard of more and less than 250 movies per genre for further analysis.**
+
+
+## Overall Production Budget Distribution
+
+@fig-overall shows a positively skewed distribution of production budgets.This suggests that high production budgets are relatively uncommon, while most films are produced with more modest budgets. The Head of Production should consider this skewed distribution when planning future budgets, as a small number of high-budget films may influence the overall mean.
+
+```{r}
+#| label: fig-overall
+#| fig-cap: "Overall production budget distribution across all genres."
+#| output: true
+
+# Overall budget distribution
+
+budget_plot_data <- movies_clean |>
+  filter(
+    !is.na(budget),
+    budget > 0
+  ) |>
+  mutate(budget_m = budget / 1e6)
+
+# Plot overall budget distribution
+ggplot(budget_plot_data, aes(x = budget_m)) +
+  geom_histogram(
+    bins = 30,
+    fill = "steelblue",
+    colour = "white"
+  ) +
+  labs(
+    title = "Overall Production Budget Distribution",
+    x = "Production Budget ($ millions)",
+    y = "Number of Movies"
+  ) +
+  theme_minimal()
+
+
+
+```
+#### Production Budget Acorss Genre
+
+
+```{r}
+#| label: fig-budget-above-250
+#| fig-cap: "Production budget distribution for genres."
+#| output: true
+
+
+
+ggplot(focus_genre_movies, aes(x = budget_m, fill = primary_genre)) +
+  geom_histogram(bins = 30, colour = "white") +
+  facet_wrap(~ primary_genre, scales = "fixed") +
+  scale_fill_manual(
+    values = grDevices::hcl.colors(
+      dplyr::n_distinct(focus_genre_movies$primary_genre),
+      palette = "Dynamic"
+    )
+  ) +
+  labs(
+    title = "Production Budget Distribution: Genres",
+    x = "Production Budget ($ millions)",
+    y = "Number of Movies"
+  ) +
+  theme_minimal() + 
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 10)
+  )
+```
+
+
+## ROI distribution (Overall and by genre)
+
+In @fig-overall-roi distribution is concentrated around a revenue-to-budget ratio of approximately 1, with a right-skewed tail extending towards much higher values. Most films have ratios relatively close to the central range, but a small number achieve exceptionally high revenue relative to their production budgets.
+
+```{r}
+#| label: fig-overall-roi
+#| fig-cap: "Overall distribution of revenue-to-budget ratios across the selected genres."
+#| output: true
+
+ggplot(movies_clean, aes(x = roi + 0.01)) +
+  geom_histogram(bins = 35, fill = "#6BAE75", colour = "white") +
+  scale_x_log10() +
+  geom_vline(
+    xintercept = median(movies_clean$roi, na.rm = TRUE) + 0.01,
+    colour = "#C9485B",
+    linewidth = 1,
+    linetype = "dashed"
+  ) +
+  labs(
+    title = "Overall ROI Distribution Across All Genres",
+    subtitle = "Red dashed line = median ROI; break-even at ROI = 1",
+    x = "ROI (log10 scale)",
+    y = "Number of Movies"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+#| label: fig-roi-above-250
+#| fig-cap: "ROI distributions for genres." 
+#| output: true
+
+# ROI distribution: genres with more than 250 movies
+ggplot(
+  focus_genre_movies |>
+    filter(!is.na(roi), is.finite(roi), roi > -0.01),
+  aes(x = roi + 0.01, fill = primary_genre)
+) +
+  geom_histogram(bins = 25, colour = "white") +
+  scale_x_log10() +
+  facet_wrap(~primary_genre, ncol = 3) +
+  geom_vline(
+    xintercept = 1.01,
+    colour = "#C9485B",
+    linewidth = 0.8,
+    linetype = "dashed"
+  ) +
+  labs(
+    title = "ROI Distribution: Genres",
+    subtitle = "Dashed line = break-even (ROI = 1)",
+    x = "ROI (log10 scale)",
+    y = "Number of Movies"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+## Franchise and Original Film Composition
+
+The overall slate is dominated by original films, which account for 94.6% of films, while franchises represent only 5.4%. This indicates that the historical slate relies mainly on standalone productions rather than established franchises.
+
+```{r}
+#| output: true
+
+# Overall franchise bar
+movies_clean |>
+  count(franchise_status) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = franchise_status, y = pct, fill = franchise_status)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = paste0(round(pct, 1), "%")),
+            vjust = -0.4, size = 4) +
+  scale_fill_manual(values = c(Original = "#5B8DB8", Franchise = "#E07B54")) +
+  labs(
+    title = "Overall Slate Composition",
+    x     = NULL,
+    y     = "% of films"
+  ) +
+  ylim(0, 105) +
+  theme(legend.position = "none")
+```
+```{r}
+focus_genre_movies |>
+  filter(!is.na(primary_genre), primary_genre != "TV Movie") |>
+  group_by(primary_genre, franchise_status) |>
+  summarise(n = n(), .groups = "drop") |>
+  group_by(primary_genre) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = franchise_status, y = pct, fill = franchise_status)) +
+  geom_col(width = 0.6) +
+  geom_text(
+    aes(label = paste0(round(pct, 1), "%")),
+    vjust = -0.4,
+    size = 3
+  ) +
+  scale_fill_manual(
+    values = c(
+      Original = "#5B8DB8",
+      Franchise = "#E07B54"
+    )
+  ) +
+  facet_wrap(~primary_genre, ncol = 3) +
+  labs(
+    title = "Franchise vs. Original Across Focus Genres",
+    x = NULL,
+    y = "Percentage within genre"
+  ) +
+  coord_cartesian(ylim = c(0, 110)) +
+  theme_minimal() +
+  theme(legend.position = "none") 
+```
+
+
+## Slate Trends Over Time (2000–2016) 
+
+Franchise films make up 7% of the overall slate. Horror (21%) and Action (11%) have the highest franchise concentration; Drama sits lowest at just 1%.
+
+
+```{r}
+trend_summary <- movies_clean |>
+  filter(release_year >= 2000, release_year <= 2016) |>
+  group_by(release_year) |>
+  summarise(
+    n_films       = n(),
+    median_budget = median(budget_m,  na.rm = TRUE),
+    median_roi    = median(roi,        na.rm = TRUE),
+    pct_franchise = sum(franchise_status == "Franchise") / n() * 100,
+    .groups       = "drop"
+  )
+```
+
+
+Franchise share increased towards 2016, reaching approximately 16%. Median production budgets generally declined from around $33 million in 2000 to $22 million in 2014–2015, before recovering slightly. In contrast, median ROI increased after 2010, reaching approximately 2.9 in 2016.
+
+```{r}
+#| output: true
+
+trend_summary |>
+  pivot_longer(
+    cols      = c(median_budget, median_roi, pct_franchise),
+    names_to  = "metric",
+    values_to = "value"
+  ) |>
+  mutate(metric = recode(metric,
+    median_budget  = "Median Budget (USD millions)",
+    median_roi     = "Median ROI",
+    pct_franchise  = "Franchise Share (%)"
+  )) |>
+  ggplot(aes(x = release_year, y = value)) +
+  geom_line(colour = "#5B8DB8", linewidth = 0.9) +
+  geom_point(colour = "#5B8DB8", size = 1.8) +
+  geom_smooth(method = "loess", se = FALSE,
+              colour = "#C9485B", linewidth = 0.9, linetype = "dashed") +
+  facet_wrap(~ metric, ncol = 1, scales = "free_y") +
+  labs(
+    title    = "Slate Trends Over Time (2000–2016)",
+    subtitle = "Red dashed = LOESS trend",
+    x        = "Release Year",
+    y        = NULL
+  ) +
+  scale_x_continuous(breaks = seq(2000, 2016, 4))
+```
+
+
+The Head of Production should consider these differences when evaluating opportunities to develop new original projects or invest in franchise films. However, the percentages describe the composition of the slate rather than financial success, so they should be considered alongside budget and ROI results before making investment decisions.
+
+
+## Summary for the Head of Production
+
+The overall budget distribution is positively skewed, with most films having lower budgets. Action and Adventure show wider budget ranges. Originals account for 94.6% of films, while franchises represent 5.4%. Horror has the highest franchise share among genres with over 250 films (15.7%), while Science Fiction leads among lower-volume genres (14.6%).
+
+ROI varies across genres, with some films earning well above their production budgets. From 2000 to 2016, median ROI generally increased after 2010, reaching approximately 2.9 in 2016. Median budgets declined before recovering slightly, while franchise share rose to around 16%.
+
+Zero budgets and revenues were treated as missing, and blank text values were converted to NA. Records with invalid budgets or missing genres were excluded from relevant plots, but the original dataset was retained. These limitations should be considered when using budget, ROI, genre and franchise trends to guide production decisions.
+
+
+
+
+# Task 2
+
+```{r}
+t2 <- movies |>
+  mutate(
+    budget = if_else(budget == 0, NA_real_, as.numeric(budget)),
+    revenue = if_else(revenue == 0, NA_real_, as.numeric(revenue)),
+    roi = revenue / budget,
+    budget_m = budget / 1e6,
+    franchise_status = factor(
+      franchise_status,
+      levels = c("Original", "Franchise")
+    )
+  )
+```
+
+Budgets below \$10,000 are placeholders, so they were set to `NA` and no rows were deleted. Films with no usable budget are left out of the budget comparison only, because a median cannot be calculated without a budget. @tbl-t2-missing shows how many films this affects.
+
+```{r}
+#| label: tbl-t2-missing
+#| tbl-cap: "Films with and without a usable budget, by franchise status"
+#| output: true
+movies |>
+  filter(!is.na(franchise_status)) |>
+  group_by(franchise_status) |>
+  summarise(
+    films = n(),
+    usable_budget = sum(!is.na(budget)),
+    missing_budget = sum(is.na(budget)),
+    pct_missing = round(100 * mean(is.na(budget)), 1)
+  ) |>
+  knitr::kable(col.names = c("Franchise status", "Films", "Usable budget", "Missing budget", "% missing"))
+```
+
+
+### 1. Comparing the budget distributions
+
+
+```{r}
+
+#| label: fig-t2plot
+#| fig-cap: "Budget distributions by franchise status (log scale, axis labelled in dollars)"
+#| fig-height: 4
+#| fig-width: 8
+#| output: true
+
+
+ggplot(t2, aes(x = budget, fill = franchise_status)) +
+  geom_density(alpha = 0.4) +
+  scale_x_log10(
+    breaks = c(1e5, 1e6, 1e7, 1e8),
+    labels = c("$0.1M", "$1M", "$10M", "$100M")
+  ) +
+  labs(
+    title = "Franchise budgets sit higher, but the two groups overlap heavily",
+    x = "Production budget (log scale)",
+    y = "Density",
+    fill = "Franchise status"
+  ) +
+  theme_minimal()
+
+```
+
+Franchise films generally have higher production budgets than original films, although the distributions overlap considerably. Original films are more concentrated at lower budgets, while franchises tend towards higher spending.
+
+
+```{r}
+#| label: fig-t2-box
+#| fig-cap: "Budget by franchise status (log scale). The line in each box is the median."
+#| fig-height: 3
+#| fig-width: 8
+#| output: true
+ggplot(t2, aes(x = budget, y = franchise_status)) +
+  geom_boxplot() +
+  scale_x_log10(
+    breaks = c(1e5, 1e6, 1e7, 1e8),
+    labels = c("$0.1M", "$1M", "$10M", "$100M")
+  ) +
+  labs(x = "Production budget (log scale)", y = NULL) +
+  theme_minimal()
+```
+
+@fig-t2-box confirms that franchise films have a higher median budget than original films. However, both groups show substantial variation, indicating that franchise status alone does not determine production spending.
+
+### 2. Interval estimate for the difference in median budget
+
+We used a 95% percentile bootstrap interval: each group was resampled with replacement at its own size, Franchise median minus Original median was calculated, this was repeated 5,000 times, and the middle 95% was taken. All calculations are in dollars.
+
+```{r}
+#| label: t2-boot
+
+obs_diff <- t2 |>
+  group_by(franchise_status) |>
+  summarise(
+    median_budget = median(budget, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  summarise(
+    diff = median_budget[franchise_status == "Franchise"] -
+           median_budget[franchise_status == "Original"]
+  ) |>
+  pull(diff)
+
+perform_bootstrap <- function(bootstrap_number) {
+  t2 |>
+    group_by(franchise_status) |>
+    slice_sample(prop = 1, replace = TRUE) |>
+    summarise(
+      median_budget = median(budget, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    summarise(
+      boot_diff = median_budget[franchise_status == "Franchise"] -
+                  median_budget[franchise_status == "Original"]
+    ) |>
+    mutate(bootstrap_sample = bootstrap_number)
+}
+
+bootstrap_results <- map_dfr(1:5000, perform_bootstrap)
+
+ci <- quantile(
+  bootstrap_results$boot_diff,
+  probs = c(0.025, 0.975),
+  na.rm = TRUE
+)
+```
+
+```{r}
+#| label: tbl-t2-ci
+#| tbl-cap: "Difference in median budget (Franchise minus Original) with 95% bootstrap interval (USD millions)"
+#| output: true
+
+
+tibble(observed = obs_diff, lower = ci[1], upper = ci[2]) |>
+  mutate(across(everything(), ~ round(.x / 1e6, 1))) |>
+  knitr::kable(col.names = c("Observed difference", "Lower 95%", "Upper 95%"))
+```
+
+```{r}
+#| label: fig-t2-boot
+#| fig-cap: "Bootstrap distribution of the difference in median budget. Solid line: observed difference. Dashed lines: 95% interval."
+#| fig-height: 3
+#| fig-width: 7
+#| output: true
+
+bootstrap_results |>
+  ggplot(aes(x = boot_diff)) +
+  geom_histogram(bins = 40, colour = "white") +
+  geom_vline(xintercept = obs_diff) +
+  geom_vline(xintercept = ci, linetype = "dashed") +
+  scale_x_continuous(labels = ~ paste0("$", .x / 1e6, "M")) +
+  labs(x = "Franchise median minus Original median", y = "Count") +
+  theme_minimal()
+```
+
+The observed difference in median budget is \$`r round(obs_diff / 1e6, 1)`M, and the 95% interval runs from \$`r round(ci[1] / 1e6, 1)`M to \$`r round(ci[2] / 1e6, 1)`M (@tbl-t2-ci, @fig-t2-boot). The interval does not include zero, so the typical Franchise budget is higher than the typical Original budget.
+
+### 3. Does this support leadership's concern?
+
+```{r}
+#| label: tbl-t2-concern
+#| tbl-cap: "Share of films and budget, and proportion of low and high budgets, by franchise status"
+#| output: true
+t2 |>
+  group_by(franchise_status) |>
+  summarise(
+    n_films = n(),
+    share_of_films = n() / nrow(t2),
+    share_of_budget = sum(budget) / sum(t2$budget),
+    under_10M = mean(budget < 10e6),
+    over_100M = mean(budget > 100e6)
+  ) |>
+  mutate(across(share_of_films:over_100M, ~ round(.x, 3))) |>
+  knitr::kable(col.names = c("Franchise status", "Films", "Share of films", "Share of budget",
+                             "Under $10M", "Over $100M"))
+```
+
+```{r}
+#| label: tbl-t2-revenue
+#| tbl-cap: "Share of total revenue by franchise status (films with revenue recorded)"
+#| output: true
+
+movies |>
+  filter(!is.na(revenue), !is.na(franchise_status)) |>
+  group_by(franchise_status) |>
+  summarise(total_revenue = sum(revenue)) |>
+  mutate(share_of_revenue = round(total_revenue / sum(total_revenue), 3)) |>
+  knitr::kable(col.names = c("Franchise status", "Total revenue", "Share of revenue"))
+```
+
+Leadership's concern is only partly supported. Franchise films do indeed have larger budget per movie, where 22% of them have a budget higher than \$100M whereas only 6.5% of Originals do that (@tbl-t2-concern). However, Originals are not primarily small movies because 27% of them have budgets less than \$10M. 
+
+Franchise films represent 6% of films, have 10% of budget (@tbl-t2-concern) and 14% of revenue (@tbl-t2-revenue), so Originals provide most of both expenses and income. It is an observation, so it only reveals budget gap without providing evidence on causation. Moreover, 23% of Originals do not have their budget specified at all compared to 10% of Franchise films (@tbl-t2-missing), so the actual gap may be even larger.
+
+### 4. Investment advice
+
+The data doesn't indicate that Originals are constrained by smaller budgets. This is the optimal approach: keep a few high-budget Franchise movies and increase the number of mid-budget Originals instead of considering Originals as small investments. The only problem to look out for is the extremely high Franchise budgets, because a couple of movies can affect the whole slate negatively. It doesn't say anything about return on investment, and so the optimal mix will include the results from Tasks 3 and 4.
+
+### Summary for the Head of Production
+
+We compared Franchise and Original budgets using the median, which is not affected by some very costly movies. An average Franchise movie had an estimated budget of \$40M while an average Original had an estimated budget of \$22M. With 95% confidence we estimate that the real difference lies in the interval from \$9M to \$26M.. Franchise movies have higher budget on average but there is significant overlap between the two distributions, Original movies are not mostly low-budget movies, and Franchise movies represent only 10% of the total budget. We recommend maintaining some Franchise movies and developing mid-budget Originals.
+
+# Task 3 
+
+## Part A
+
+Universal Pictures was selected as Meridian Pictures’ benchmark. After filtering invalid budgets, 260 films remained. The mean budget was $41.57 million, the median was $30.50 million, and the standard deviation was $37.89 million. The higher mean indicates right-skewness, while the large standard deviation shows substantial budget variation. Therefore, a probability distribution is more useful than a single average for modelling production costs.
+
+```{r}
+#| echo: false
+#| output: true
+#| include: false
+
+# Fitting in the data with normal distribution
+
+Universal_budget <- movies |>
+  dplyr::filter(primary_company == "Universal Pictures") |>
+  dplyr::select(title, id, status, primary_genre, budget) |>
+  dplyr::mutate(budget = as.double(budget))
+
+#checking for any negative, zero or other anomaly in budget
+
+Universal_budget |>
+  summarise(
+    total_films = n(),
+    missing_budgets = sum(is.na(budget)),
+    zero_budgets = sum(budget == 0, na.rm = TRUE),
+    negative_budgets = sum(budget < 0, na.rm = TRUE),
+    positive_budgets = sum(budget > 0, na.rm = TRUE)
+  )
+
+
+#Summary statistics
+
+budget_summary <- Universal_budget |>
+  summarise(
+    n = n(),
+    mean_budget = mean(budget, na.rm = TRUE),
+    median_budget = median(budget, na.rm = TRUE),
+    sd_budget = sd(budget, na.rm = TRUE)
+  )
+
+#creating the table out of the summary statistics
+
+budget_summary |>
+  gt() |>
+  tab_header(
+    title = "Universal Pictures Production Budget Summary",
+    subtitle = "Descriptive statistics of historical film budgets"
+  ) |>
+  cols_label(
+    n = "Number of Films",
+    mean_budget = "Mean Budget (USD)",
+    median_budget = "Median Budget (USD)",
+    sd_budget = "Standard Deviation (USD)"
+  ) |>
+  fmt_number(
+    columns = c(mean_budget, median_budget, sd_budget),
+    decimals = 2,
+    use_seps = TRUE
+  ) |>
+  fmt_number(
+    columns = n,
+    decimals = 0,
+    use_seps = TRUE
+  ) |>
+  opt_row_striping() |>
+  opt_table_outline() |>
+  tab_source_note(
+    source_note = "Source: Historical Universal Pictures film budget data."
+)
+
+```
+
+### Assessment of the Normal Distribution
+
+Universal Pictures’ production budgets are positively skewed, with most films having lower budgets and a few requiring much higher investment. The fitted normal curve does not capture this asymmetry, suggesting that a right-skewed distribution may better represent production budgets and their associated probabilities.
+
+```{r}
+#| echo: false
+#| output: true
+#plotting the graph 
+
+ggplot(Universal_budget, aes(x = budget)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    bins = 30,
+    fill = "skyblue",
+    colour = "black"
+  ) +
+  stat_function(
+    fun = dnorm,
+    args = list(
+      mean = mean(Universal_budget$budget, na.rm= TRUE),
+      sd= sd(Universal_budget$budget, na.rm= TRUE)
+      
+    ),
+    colour = "brown",
+    linewidth = 1.2
+  ) +
+  geom_vline(
+    xintercept = mean(Universal_budget$budget, na.rm = TRUE),
+    colour = "darkblue",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  labs(
+    title = "Universal Pictures Production Budgets",
+    subtitle = "Histogram with fitted normal distribution",
+    x = "Production Budget (USD)",
+    y = "Density"
+  ) +
+  theme_minimal()
+
+```
+
+## Choice of the alternative distribution and modelling
+
+To identify a realistic probability model, normal, log-normal, Gamma, Exponential and Weibull distributions were considered. Their fitted curves and Q-Q plots were used to assess how closely the theoretical distributions represented the observed budgets, while AIC was used to compare their relative fit. The final model will be selected based on the AIC results and supporting diagnostic plots.
+
+**Note :Budgets were then divided by 10,000,000 to improve numerical convenience during model estimation while preserving their relative distribution.**
+
+```{r}
+Universal_budget_clean <- Universal_budget |>
+  filter(
+    !is.na(budget),
+    is.finite(budget),
+    budget > 0
+  ) |>
+  mutate(budget_millions = budget / 10000000)
+
+budget_values <- Universal_budget_clean$budget_millions
+
+
+gamma_fit <- fitdistr(
+  budget_values,
+  "gamma"
+)
+
+weibull_fit <- fitdistr(
+  budget_values,
+  "weibull"
+)
+
+exponential_fit <- fitdistr(
+  budget_values,
+  "exponential"
+)
+
+```
+
+## Graphical Representation of Model Choice
+
+@fig-budget-distributions compares the Gamma, Exponential and Weibull distributions fitted to Universal Pictures' production budgets. The observed budgets are positively skewed, with most films concentrated at lower budget levels and a smaller number of films having substantially higher budgets.
+
+```{r}
+#| label: fig-budget-distributions
+#| fig-cap: "Comparison of fitted Gamma, Exponential and Weibull distributions for Universal Pictures' production budgets."
+#| fig-width: 12
+#| fig-height: 5
+#| echo: false
+#| output: true
+#plotting the three fits in histogram
+
+make_plot <- function(curve, distribution_name, curve_colour) {
+
+  ggplot(
+    data.frame(budget_values = budget_values),
+    aes(x = budget_values)
+  ) +
+
+    geom_histogram(
+      aes(y = after_stat(density)),
+      bins = 30,
+      fill = "skyblue",
+      colour = "black"
+    ) +
+
+    stat_function(
+      fun = curve,
+      colour = curve_colour,
+      linewidth = 1.2,
+      args = switch(
+        distribution_name,
+
+        "Gamma" = list(
+          shape = gamma_fit$estimate["shape"],
+          rate = gamma_fit$estimate["rate"]
+        ),
+
+        "Exponential" = list(
+          rate = exponential_fit$estimate["rate"]
+        ),
+
+        "Weibull" = list(
+          shape = weibull_fit$estimate["shape"],
+          scale = weibull_fit$estimate["scale"]
+        )
+      )
+    ) +
+
+    labs(
+      title = distribution_name,
+      x = NULL,
+      y = "Density"
+    ) +
+
+    theme_minimal() +
+
+    theme(
+      axis.title.x = element_blank()
+    )
+}
+
+
+# Create the three plots
+p_gamma <- make_plot(
+  dgamma, "Gamma", "red"
+)
+
+p_exponential <- make_plot(
+  dexp, "Exponential", "blue"
+)
+
+p_weibull <- make_plot(
+  dweibull, "Weibull", "darkgreen"
+)
+
+combined_plot <- (
+  p_gamma | p_exponential | p_weibull
+) +
+
+  plot_annotation(
+    title = "Universal Pictures Production Budgets",
+    subtitle = paste(
+      "Comparison of fitted Gamma, Exponential",
+      "and Weibull distributions"
+    ),
+    caption = "Budget (Units of USD 10 Million)"
+  ) &
+
+  theme(
+    plot.caption = element_text(
+      hjust = 0.5,
+      size = 11,
+      colour = "black"
+    )
+  )
+
+
+# Display the final figure
+combined_plot
+
+```
+
+The @fig-budget-qq compare the observed production budgets of Universal Pictures with the fitted Gamma, Exponential and Weibull distributions. The Gamma and Weibull distributions align more closely with the reference line across most of the budget range, although both deviate for higher-budget films. The Exponential distribution shows greater deviation, suggesting a weaker fit.
+
+```{r}
+#| label: fig-budget-qq
+#| fig-cap: "Q-Q plots comparing Gamma, Exponential and Weibull distributions fitted to Universal Pictures' production budgets."
+#| fig-width: 12
+#| fig-height: 5
+#| echo: false
+#| output: true
+
+
+n <- length(budget_values)
+p <- ppoints(n)
+observed <- sort(budget_values)
+
+# Gamma Q-Q plot data
+gamma_qq <- data.frame(
+  theoretical = qgamma(
+    p,
+    shape = gamma_fit$estimate["shape"],
+    rate = gamma_fit$estimate["rate"]
+  ),
+  observed = observed
+)
+
+# Exponential Q-Q plot data
+exponential_qq <- data.frame(
+  theoretical = qexp(
+    p,
+    rate = exponential_fit$estimate["rate"]
+  ),
+  observed = observed
+)
+
+# Weibull Q-Q plot data
+weibull_qq <- data.frame(
+  theoretical = qweibull(
+    p,
+    shape = weibull_fit$estimate["shape"],
+    scale = weibull_fit$estimate["scale"]
+  ),
+  observed = observed
+)
+
+
+# Function to create each Q-Q plot
+make_qq_plot <- function(qq_data, distribution_name) {
+
+  ggplot(
+    qq_data,
+    aes(x = theoretical, y = observed)
+  ) +
+    geom_point(size = 1.5) +
+    geom_abline(
+      intercept = 0,
+      slope = 1,
+      colour = "red",
+      linewidth = 0.7
+    ) +
+    labs(
+      title = distribution_name,
+      x = NULL,
+      y = "Observed Quantiles"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.title.x = element_blank(),
+      plot.title = element_text(
+        face = "bold",
+        hjust = 0.5
+      )
+    )
+}
+
+
+# Create individual plots
+qq_gamma <- make_qq_plot(
+  gamma_qq, "Gamma"
+)
+
+qq_exponential <- make_qq_plot(
+  exponential_qq, "Exponential"
+)
+
+qq_weibull <- make_qq_plot(
+  weibull_qq, "Weibull"
+)
+
+
+# Combine all three Q-Q plots
+combined_qq <- (
+  qq_gamma | qq_exponential | qq_weibull
+) +
+  plot_annotation(
+    title = "Q-Q Plot Comparison of Production Budget Distributions",
+    subtitle = "Universal Pictures | Budgets in units of USD 10 million",
+    caption = "The red line represents theoretical agreement."
+  ) &
+  theme(
+    plot.caption = element_text(
+      hjust = 0.5,
+      size = 10
+    )
+  )
+
+# Display the combined figure
+combined_qq
+```
+
+## Comparing the AIC for Decision making
+
+The AIC results indicate that the Gamma distribution provides the best relative fit for Universal Pictures’ production budgets, with a score of 1201.090. The Weibull distribution performs almost equally well (1201.542), while the Exponential distribution has a higher AIC (1213.346), indicating a weaker fit. For Meridian Pictures, Gamma is therefore the preferred model for estimating historical budget patterns, although Weibull remains a reasonable alternative.
+
+```{r}
+#| echo: false
+#| output: true
+
+aic_table <- data.frame(
+  Distribution = c(
+    "Gamma",
+    "Exponential",
+    "Weibull"
+  ),
+  AIC = c(
+    AIC(gamma_fit),
+    AIC(exponential_fit),
+    AIC(weibull_fit)
+  )
+)
+
+#creating the table to see clearly
+
+aic_table |>
+  gt() |>
+  tab_header(
+    title = "Comparison of Fitted Distributions",
+    subtitle = "Akaike Information Criterion (AIC)"
+  ) |>
+  cols_label(
+    Distribution = "Distribution",
+    AIC = "AIC Value"
+  ) |>
+  fmt_number(
+    columns = AIC,
+    decimals = 3
+  ) |>
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_body(
+      columns = AIC,
+      rows = AIC == min(AIC)
+    )
+  ) |>
+  tab_source_note(
+    source_note = "Lower AIC values indicate a better relative model fit."
+  )
+
+
+
+```
+
+## Part B
+
+Action films across all studios were analysed to assess downside risk. Numeric variables were checked for missing, zero, negative and infinite values. Zero-budget films were identified because ROI cannot be reliably calculated, while missing and infinite ROI values were excluded. Valid zero and negative ROI values were retained as potentially genuine financial outcomes.
+
+```{r data cleaning for action}
+
+
+#filtering data
+action_data <- movies |>
+  filter(
+    primary_genre == "Action"
+  )
+
+#checking for negative, zero and NA in the filtered data
+
+action_data|>
+  summarise(
+    across(
+      where(is.numeric),
+      list(
+        NA_count = ~sum(is.na(.x)),
+        zero_count = ~sum(.x == 0, na.rm = TRUE),
+        negative_count = ~sum(.x < 0, na.rm = TRUE)
+      )
+    )
+  )
+#looking for negatives, 0 and infinte values in ROI variable
+
+action_data |>
+  summarise(
+    total_films = n(),
+    missing_ROI = sum(is.na(roi)),
+    zero_ROI = sum(roi == 0, na.rm = TRUE),
+    infinite_ROI = sum(!is.finite(roi), na.rm = TRUE)
+  )
+
+#cleaning the action filtered data
+
+infinite_row <- action_data |> 
+  filter(budget == 0 & revenue > 0)
+
+action_data_clean<- action_data |> mutate(
+    revenue = ifelse(budget == 0, NA, revenue),
+    budget = ifelse(budget==0, NA, budget),
+    profit  = ifelse(budget == 0, NA, profit)
+  )
+
+```
+
+The 25th percentile of ROI was estimated using non-parametric bootstrapping with 15,000 resamples. This method repeatedly resamples the observed ROI values with replacement, without assuming a specific probability distribution.
+
+The estimated 25th percentile was 0.5764, with a 95% confidence interval of 0.4963 to 0.6596. This suggests that the lower-performing quarter of Action films has an ROI threshold of approximately 0.5764, with uncertainty reflected in the confidence interval.
+
+```{r non parametric}
+roi_values <- action_data_clean$roi
+
+# Remove missing and infinite values
+roi_values <- roi_values[
+  !is.na(roi_values) & is.finite(roi_values)
+]
+
+# Estimating 25th percentile
+q25 <- quantile(roi_values, probs = 0.25)
+
+# Non-parametric bootstrap
+set.seed(100)
+
+B <- 15000
+n <- length(roi_values)
+
+bootstrap_q25 <- replicate(
+  B,
+  quantile(
+    sample(roi_values, size = n, replace = TRUE),
+    probs = 0.25,
+    names = FALSE
+  )
+)
+
+# Calculate the 95% confidence interval
+bootstrap_CI <- quantile(
+  bootstrap_q25,
+  probs = c(0.025, 0.975)
+)
+
+# Display results
+q25
+bootstrap_CI
+```
+
+```{r parametric}
+
+# Prepare ROI values
+roi_values <- action_data_clean$roi
+
+roi_values <- roi_values[
+  !is.na(roi_values) & is.finite(roi_values)
+]
+
+# Fit a normal distribution
+normal_fit <- fitdistr(roi_values, "normal")
+
+mu <- normal_fit$estimate["mean"]
+sigma <- normal_fit$estimate["sd"]
+
+# Estimate the 25th percentile
+q25_normal <- qnorm(
+  0.25,
+  mean = mu,
+  sd = sigma
+)
+
+# Parametric bootstrap
+set.seed(100)
+
+B <- 15000
+n <- length(roi_values)
+
+parametric_q25 <- replicate(
+  B,
+  quantile(
+    rnorm(n, mean = mu, sd = sigma),
+    probs = 0.25,
+    names = FALSE
+  )
+)
+
+# Calculate the 95% confidence interval
+parametric_CI <- quantile(
+  parametric_q25,
+  probs = c(0.025, 0.975)
+)
+
+# Display results
+q25_normal
+parametric_CI
+
+```
+
+# Part C
+
+A normal parametric bootstrap was initially used to compare the results with the non-parametric method. The normal distribution accommodates both positive and negative ROI values, unlike the standard Gamma and Weibull distributions, which require strictly positive values. 
+
+As shown in @tbl-roi-comparison, the non-parametric bootstrap estimates the 25th percentile at 0.5764, with a 95% confidence interval of 0.4963–0.6596, while the normal parametric bootstrap estimates it at −0.8080.
+
+The **non-parametric bootstrap** is preferred because it preserves the observed distribution without assuming normality. For Meridian Pictures, this provides a more defensible estimate of lower-end ROI, supporting investment decisions that account for the actual variation in Action-film returns.
+
+```{r}
+#| label: tbl-roi-comparison
+#| tbl-cap: "Comparison of 25th Percentile ROI Estimates and 95% Confidence Intervals"
+#| echo: false
+#| output: true
+
+comparison_table <- data.frame(
+  Method = c(
+    "Non-parametric bootstrap",
+    "Normal parametric bootstrap"
+  ),
+  `25th Percentile` = c(
+    as.numeric(q25),
+    as.numeric(q25_normal)
+  ),
+  `Lower 95% CI` = c(
+    as.numeric(bootstrap_CI[1]),
+    as.numeric(parametric_CI[1])
+  ),
+  `Upper 95% CI` = c(
+    as.numeric(bootstrap_CI[2]),
+    as.numeric(parametric_CI[2])
+  ),
+  Suitability = c(
+    "Preferred: preserves the observed ROI distribution",
+    "Less suitable: assumes normally distributed ROI"
+  ),
+  check.names = FALSE
+)
+
+comparison_table |>
+  gt() |>
+  tab_header(
+    title = "Comparison of Action Film ROI Estimates",
+    subtitle = "25th Percentile and 95% Confidence Intervals"
+  ) |>
+  fmt_number(
+    columns = c(
+      `25th Percentile`,
+      `Lower 95% CI`,
+      `Upper 95% CI`
+    ),
+    decimals = 4
+  ) |>
+  cols_label(
+    Method = "Estimation Method",
+    `25th Percentile` = "Estimated Q25",
+    `Lower 95% CI` = "Lower Limit",
+    `Upper 95% CI` = "Upper Limit",
+    Suitability = "Assessment"
+  ) |>
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_body(
+      columns = Method,
+      rows = Method == "Non-parametric bootstrap"
+    )
+  )
+```
+
+# Part D
+
+Universal Pictures’ production budgets are positively skewed, making the Gamma distribution more suitable than the normal distribution for simulating budget patterns. For Action films, the non-parametric bootstrap estimates the lower-quarter revenue-to-budget ratio at 0.5764, with a confidence interval of approximately 0.467–0.676. 
+
+This suggests that lower-performing Action films generate around 58 cents in revenue per $1 of production budget. This is not a 58% profit or return, as the ratio excludes other costs.
+
+The confidence interval communicates uncertainty around the estimate. Together, these findings help Meridian Pictures simulate realistic budgets and assess potential downside risk when planning future productions.
+
+# Task 4
+
+#Part A: Defining the outcome and justifying the model
+
+A film is defined as a **flop** if it fails to recoup its production budget at the box office, i.e. ROI \< 1. This is created as a binary variable: 1 = flop, 0 = not a flop.
+
+
+
+
+```{r}
+movies_clean |>
+  summarise(
+    total_movies = n(),
+    flops = sum(roi < 1, na.rm = TRUE),
+    non_flops = sum(roi >= 1, na.rm = TRUE),
+    missing_roi = sum(is.na(roi))
+  )
+
+movies_model2 <- movies_clean |>
+  filter(!is.na(roi)) |>
+  mutate(flop = if_else(roi < 1, 1, 0))
+
+genre_focus <- c(
+  "Action",
+  "Comedy",
+  "Drama",
+  "Horror",
+  "Animation"
+)
+
+movies_model2 <- movies_model2 |>
+  filter(primary_genre %in% genre_focus)
+
+movies_model2 |>
+  summarise(
+    total_movies = n(),
+    flops = sum(roi < 1, na.rm = TRUE),
+    non_flops = sum(roi >= 1, na.rm = TRUE),
+    missing_roi = sum(is.na(roi))
+  )
+```
+
+```{r}
+#creating modelling dataset
+movies_model2<- movies_model2 |>
+  mutate(
+    flop = if_else(
+      roi < 1,
+      1L,
+      0L,
+      missing = NA_integer_
+    ),
+    log_budget = log(budget)
+  ) |>
+  filter(
+    !is.na(flop),
+    !is.na(primary_genre),
+    !is.na(franchise_status),
+    !is.na(log_budget),
+    is.finite(log_budget),
+    !is.na(cast_size)
+  )
+```
+
+### Why Logistic Regression?
+
+We use logistic regression to predict whether a film will flop, making this a binary classification problem. Unlike linear regression, which predicts continuous values, logistic regression estimates probabilities between 0 and 1. 
+
+Poisson regression is mainly used for count data. Logistic regression also helps Meridian Pictures understand how factors such as genre, budget and franchise status affect flop probability, supporting more informed greenlight decisions.
+
+
+### Part B
+
+**Note: Action was selected as the reference genre because its downside risk was examined in the earlier analysis.**
+
+Frequentist and Bayesian logistic regression models were fitted using 2,265 films, with genre, franchise status, log budget and crew size as predictors of flop probability (ROI < 1). The Bayesian model used weakly informative normal priors, (N(0, 2.5)), on the log-odds scale. Both models produced similar odds ratios and intervals.
+
+```{r}
+
+movies_model2 |>
+  mutate(
+    primary_genre = relevel(
+      factor(primary_genre),
+      ref = "Action"
+    )
+  )
+
+model_freq <- glm(
+  flop ~ primary_genre +
+    franchise_status +
+    log_budget +
+    crew_size,
+  data = movies_model2,
+  family = binomial(link = "logit")
+)
+```
+
+```{r}
+exp(coef(model_freq))
+exp(confint(model_freq))
+```
+
+```{r}
+#| echo: false
+#| output: true
+results <- broom::tidy(
+  model_freq,
+  conf.int = TRUE,
+  exponentiate = TRUE
+) |>
+  dplyr::select(
+    term,
+    estimate,
+    conf.low,
+    conf.high,
+    p.value
+  ) |>
+  dplyr::rename(
+    Predictor = term,
+    `Odds Ratio` = estimate,
+    `95% CI Lower` = conf.low,
+    `95% CI Upper` = conf.high,
+    `P-value` = p.value
+  ) 
+
+results |>
+  gt() |>
+  fmt_number(
+    columns = c(`Odds Ratio`, `95% CI Lower`, `95% CI Upper`, `P-value`),
+    decimals = 3
+  ) |>
+  tab_header(
+    title = "Frequentist Logistic Regression Results",
+    subtitle = "Odds Ratios and 95% Confidence Intervals"
+  )
+
+```
+
+```{r}
+
+bayesian_model <- stan_glm(
+  flop ~ primary_genre +
+    franchise_status +
+    log_budget +
+    crew_size,
+  data = movies_model2,
+  family = binomial(link = "logit"),
+  prior = normal(location = 0, scale = 2.5, autoscale = FALSE),
+  prior_intercept = normal(location = 0, scale = 2.5, autoscale = FALSE),
+  chains = 4,
+  iter = 4000,
+  seed = 123,
+  refresh = 500
+)
+```
+
+Both models produced similar results. For franchise status, the frequentist 95% confidence interval was 0.121–0.431, compared with the Bayesian 95% credible interval of 0.119–0.424. For crew size, the frequentist interval was 0.984–0.991, while the Bayesian interval was 0.983–0.991. All four intervals were below 1, supporting lower estimated flop odds for franchise films and larger crews.
+
+
+```{r}
+#| echo: false
+#| output: true
+posterior_draws <- as.matrix(bayesian_model)
+
+bayes_or <- exp(
+  posterior::summarise_draws(
+    posterior::as_draws_matrix(bayesian_model)
+  )$median
+)
+
+
+tidy(
+  bayesian_model,
+  effects = "fixed",
+  conf.int = TRUE,
+  conf.level = 0.95
+) |>
+  mutate(
+    `Odds Ratio` = exp(estimate),
+    `Lower 95% CrI` = exp(conf.low),
+    `Upper 95% CrI` = exp(conf.high)
+  ) |>
+  dplyr::select(
+    term,
+    `Odds Ratio`,
+    `Lower 95% CrI`,
+    `Upper 95% CrI`
+  ) |>
+  gt() |>
+  fmt_number(
+    columns = c(
+      `Odds Ratio`,
+      `Lower 95% CrI`,
+      `Upper 95% CrI`
+    ),
+    decimals = 3
+  ) |>
+  cols_label(
+    term = "Predictor"
+  ) |>
+  tab_header(
+    title = "Bayesian Logistic Regression",
+    subtitle = "Odds Ratios and 95% Credible Intervals"
+  )
+```
+
+The posterior probability that franchise films have lower flop odds than Original films was approximately 100%. The Bayesian model showed satisfactory convergence. 
+
+**Note: Metropolis sampling was not implemented manually because `rstanarm` uses `Stan's HMC/NUTS` algorithms. Overall, both models produced consistent conclusions.**
+
+
+# Part C
+
+The frequentist and Bayesian logistic regression models were evaluated using an 80:20 training–test split, with stratification to maintain a similar proportion of flops in both datasets. Both models used genre, franchise status, log budget and crew size to predict whether a film would flop (ROI < 1).
+
+```{r}
+library(rsample)
+set.seed(123)
+
+splitting_data <- initial_split(
+  movies_model2,
+  prop = 0.8,
+  strata = flop
+)
+
+train_data <- training(splitting_data)
+test_data <- testing(splitting_data)
+```
+
+A classification threshold of 0.30 was selected as a starting point because identifying potential flops is important for greenlight decisions. Films with a predicted flop probability of at least 30% were classified as potential flops. The confusion matrices were used to calculate accuracy, sensitivity, specificity and precision for both models.
+
+```{r}
+
+model_freq_train <- glm(
+  flop ~ primary_genre +
+    franchise_status +
+    log_budget +
+    crew_size,
+  data = train_data,
+  family = binomial(link = "logit")
+)
+
+model_bayes_train <- stan_glm(
+  flop ~ primary_genre +
+    franchise_status +
+    log_budget +
+    crew_size,
+  data = train_data,
+  family = binomial(link = "logit"),
+  prior = normal(0, 2.5, autoscale = FALSE),
+  prior_intercept = normal(0, 2.5, autoscale = FALSE),
+  chains = 4,
+  iter = 4000,
+  seed = 123,
+  refresh = 500
+)
+
+prob_freq_train <- predict(
+  model_freq_train,
+  newdata = test_data,
+  type = "response"
+)
+
+threshold <- 0.30
+
+pred_freq_train <- ifelse(prob_freq_train >= threshold, 1, 0)
+
+conf_train <- table(
+  Actual = test_data$flop,
+  Predicted = pred_freq_train
+)
+
+conf_train
+
+
+Tp <- sum(test_data$flop == 1 & pred_freq_train == 1)
+Tn <- sum(test_data$flop == 0 & pred_freq_train == 0)
+Fp <- sum(test_data$flop == 0 & pred_freq_train == 1)
+Fn <- sum(test_data$flop == 1 & pred_freq_train == 0)
+
+metrics_train_data <- data.frame(
+  Accuracy = (Tp + Tn) / (Tp + Tn + Fp + Fn),
+  Sensitivity = Tp / (Tp + Fn),
+  Specificity = Tn / (Tn + Fn),
+  Precision = Tp / (Tp + Fp)
+)
+
+metrics_train_data |>
+  tidyr::pivot_longer(
+    cols = everything(),
+    names_to = "Metric",
+    values_to = "Value"
+  ) |>
+  gt::gt() |>
+  gt::fmt_percent(
+    columns = Value,
+    decimals = 1
+  ) |>
+  gt::cols_label(
+    Metric = "Performance Metric",
+    Value = "Result"
+  ) |>
+  gt::tab_header(
+    title = "Model Performance Metrics",
+    subtitle = "Classification threshold = 0.40"
+  )
+
+```
+
+Accuracy measures the proportion of correct predictions, sensitivity measures how many actual flops were identified, specificity measures how many non-flops were correctly classified, and precision measures how many predicted flops actually flopped. Comparing these metrics helps assess the models' ability to identify risky films while avoiding false alarms.
+
+```{r}
+prob_bayes <- posterior_epred(
+  model_bayes_train,
+  newdata = test_data
+) |>
+  colMeans()
+
+pred_bayes <- ifelse(prob_bayes >= threshold, 1, 0)
+
+bayes_confusion <- table(
+  Actual = factor(
+    test_data$flop,
+    levels = c(0, 1),
+    labels = c("Non-flop", "Flop")
+  ),
+  Predicted = factor(
+    pred_bayes,
+    levels = c(0, 1),
+    labels = c("Non-flop", "Flop")
+  )
+)
+
+bayes_confusion |>
+  as.data.frame() |>
+  tidyr::pivot_wider(
+    names_from = Predicted,
+    values_from = Freq,
+    values_fill = 0
+  ) |>
+  gt() |>
+  cols_label(
+    Actual = "Actual Outcome",
+    `Non-flop` = "Predicted Non-flop",
+    Flop = "Predicted Flop"
+  ) |>
+  tab_header(
+    title = "Bayesian Model Confusion Matrix",
+    subtitle = "Classification threshold = 0.30"
+  )
+
+
+
+```
+
+The threshold involves a trade-off: lowering it may identify more flops but increase false positives, while raising it may improve specificity but miss more flops. Therefore, the 0.30 threshold should be assessed against the resulting test-set metrics. Neither model should be used alone to make greenlight decisions, as predictions are uncertain and depend on historical data and the selected predictors.
+
+
+# Appendix
+
+### Group Collaboration and Contribution Report
+
+This appendix documents the allocation of tasks, group meetings, individual contributions and cross-review process undertaken to complete the assignment. It provides evidence of collaboration and quality assurance throughout the project.
+
+::: {.callout-note appearance="minimal"}
+**Group number:** Group 044
+
+**Group members:** Somya Verma, Shravani Jhadhav, Urvi Joshi
+
+**Link to Collaboration:** [Access the group's Teams page](https://tinyurl.com/p49s2bnh), [Git Hub Repo](https://github.com/somya090997/Assignment_2_StatsThinking)
+:::
+
+## 1. Task allocation
+
+Tasks were allocated among group members to ensure that each component of the assignment was completed and reviewed.
+
+- **Task 1**
+  - Analyst: Urvi
+  - Reviewer: Shravani
+
+- **Task 2**
+  - Analyst: Shravani
+  - Reviewer: Somya
+
+- **Task 3**
+  - Analyst: Somya
+  - Reviewer: Urvi
+
+- **Task 4**
+  - Part A: Urvi
+  - Part B: Somya
+  - Part C: Shravani
+  - Part D: All group members
+
+## 2. Meeting schedule
+
+The group held meetings to discuss assignment requirements, review progress, resolve issues and finalise the report.
+
+- **Meeting 1**
+  - Date: 27 September 2026, Venue: In person
+  - Purpose: Discuss the assignment requirements, allocate tasks and agree on the analysis approach.
+
+- **Meeting 2**
+  - Date: 16 October 2026, Venue: WhatsApp call
+  - Purpose: Review progress, discuss analytical findings and resolve coding issues.
+
+- **Meeting 3**
+  - Date: 23 October 2026 , Venue: In person
+  - Purpose: Cross-review completed tasks, integrate feedback and finalise the report.
+
+## 3. Individual contribution summary
+
+The following summarises each member's contributions and approximate time spent on the assignment.
+
+- **Shravani — 5 hours**
+  - Completed Task 2 and Part C of Task 4.
+  - Reviewed Urvi's work.
+
+- **Urvi — 7 hours**
+  - Completed Task 1 and Part A of Task 4.
+  - Reviewed Somya's work.
+
+- **Somya — 15 hours**
+  - Completed Task 3 and Part B of Task 4.
+  - Reviewed Shravani's work.
+  - Created the appendix and completed the final report compilation.
+
+## 4. Cross-review and feedback
+
+Kindly find the link to our Feedback Excel sheet [Excel Sheet](https://docs.google.com/spreadsheets/d/1nN1kW32ARDn_fQGwqGuT7rS4uwQsZoHX/edit?usp=sharing&ouid=103583701831509672418&rtpof=true&sd=true)
+
+## 5. Final quality assurance
+
+Before submission, the group reviewed the final report to ensure consistency, accuracy and reproducibility.
+
+- Reviewed code and verified calculations.
+- Checked the interpretation of results.
+- Checked figures, headings and cross-references.
+- Ensured the Quarto document rendered successfully.
+- Reviewed formatting and presentation.
+- Documented individual contributions and peer-review activities.
+
+**Group confirmation:** This appendix summarises the group's task allocation, meetings, individual contributions and review process.
+
+## A. Data cleaning and derived variables
+
+```r
+movies_clean <- movies |>
+  mutate(
+    budget = if_else(budget == 0, NA_real_, as.numeric(budget)),
+    revenue = if_else(revenue == 0, NA_real_, as.numeric(revenue)),
+    roi = revenue / budget,
+    budget_m = budget / 1e6,
+    franchise_status = factor(
+      franchise_status,
+      levels = c("Original", "Franchise")
+    )
+  )
+```
+
+## B. Summary statistics and visualisation
+
+```r
+movies_clean |>
+  summarise(
+    n = sum(!is.na(budget_m)),
+    median_budget = median(budget_m, na.rm = TRUE),
+    median_roi = median(roi, na.rm = TRUE)
+  )
+
+ggplot(movies_clean, aes(x = budget_m)) +
+  geom_histogram(bins = 30, colour = "white") +
+  labs(x = "Production budget ($ millions)", y = "Number of films") +
+  theme_minimal()
+```
+
+## C. Bootstrap interval for the median-budget difference
+
+```r
+set.seed(100)
+B <- 5000
+
+boot_diff <- replicate(B, {
+  original <- t2 |> filter(franchise_status == "Original") |>
+    pull(budget) |> na.omit()
+  franchise <- t2 |> filter(franchise_status == "Franchise") |>
+    pull(budget) |> na.omit()
+  median(sample(franchise, replace = TRUE)) -
+    median(sample(original, replace = TRUE))
+})
+
+quantile(boot_diff, c(0.025, 0.975), na.rm = TRUE)
+```
+
+## D. Distribution fitting and logistic regression
+
+```r
+budget_values <- Universal_budget |>
+  filter(!is.na(budget), is.finite(budget), budget > 0) |>
+  pull(budget) / 1e7
+
+gamma_fit <- MASS::fitdistr(budget_values, "gamma")
+weibull_fit <- MASS::fitdistr(budget_values, "weibull")
+exponential_fit <- MASS::fitdistr(budget_values, "exponential")
+
+movies_model2 <- movies_clean |>
+  filter(!is.na(roi)) |>
+  mutate(flop = as.integer(roi < 1), log_budget = log(budget)) |>
+  filter(is.finite(log_budget), !is.na(cast_size),
+         !is.na(primary_genre), !is.na(franchise_status))
+
+model_freq <- glm(
+  flop ~ primary_genre + franchise_status + log_budget + crew_size,
+  data = movies_model2,
+  family = binomial(link = "logit")
+)
+```
+
+## E. Bayesian logistic regression
+
+```r
+bayesian_model <- rstanarm::stan_glm(
+  flop ~ primary_genre + franchise_status + log_budget + crew_size,
+  data = movies_model2,
+  family = binomial(link = "logit"),
+  prior = normal(0, 2.5, autoscale = FALSE),
+  prior_intercept = normal(0, 2.5, autoscale = FALSE),
+  chains = 4, iter = 4000, seed = 123, refresh = 500
+)
+```
+
+## F
+
+
+
+The data were divided into training and test sets using an 80:20 stratified split, maintaining a similar proportion of flops in each set.
+
+```r
+#| echo: true
+#| eval: false
+
+set.seed(123)
+
+splitting_data <- initial_split(
+  movies_model2,
+  prop = 0.8,
+  strata = flop
+)
+
+train_data <- training(splitting_data)
+test_data <- testing(splitting_data)
+```
+
+## G Frequentist logistic regression
+
+```r
+#| echo: true
+#| eval: false
+
+model_freq_train <- glm(
+  flop ~ primary_genre + franchise_status +
+    log_budget + crew_size,
+  data = train_data,
+  family = binomial(link = "logit")
+)
+```
+
+## H Bayesian logistic regression
+
+```r
+#| echo: true
+#| eval: false
+
+model_bayes_train <- rstanarm::stan_glm(
+  flop ~ primary_genre + franchise_status +
+    log_budget + crew_size,
+  data = train_data,
+  family = binomial(link = "logit"),
+  prior = normal(0, 2.5, autoscale = FALSE),
+  prior_intercept = normal(0, 2.5, autoscale = FALSE),
+  chains = 4,
+  iter = 4000,
+  seed = 123,
+  refresh = 500
+)
+```
+
+## G Classification threshold and predictions
+
+A threshold of 0.30 was used to classify films with a predicted flop probability of at least 30% as potential flops.
+
+```r
+#| echo: true
+#| eval: false
+
+threshold <- 0.30
+
+prob_freq <- predict(
+  model_freq_train,
+  newdata = test_data,
+  type = "response"
+)
+
+prob_bayes <- colMeans(
+  rstanarm::posterior_epred(
+    model_bayes_train,
+    newdata = test_data
+  )
+)
+
+pred_freq <- ifelse(prob_freq >= threshold, 1, 0)
+pred_bayes <- ifelse(prob_bayes >= threshold, 1, 0)
+```
+
+## H Model performance metrics
+
+```r
+#| echo: true
+#| eval: false
+
+calculate_metrics <- function(actual, predicted) {
+  TP <- sum(actual == 1 & predicted == 1)
+  TN <- sum(actual == 0 & predicted == 0)
+  FP <- sum(actual == 0 & predicted == 1)
+  FN <- sum(actual == 1 & predicted == 0)
+
+  data.frame(
+    Accuracy = (TP + TN) / (TP + TN + FP + FN),
+    Sensitivity = TP / (TP + FN),
+    Specificity = TN / (TN + FP),
+    Precision = TP / (TP + FP)
+  )
+}
+
+metrics_comparison <- dplyr::bind_rows(
+  Frequentist = calculate_metrics(test_data$flop, pred_freq),
+  Bayesian = calculate_metrics(test_data$flop, pred_bayes),
+  .id = "Model"
+)
+```
+
+## I Confusion matrices
+
+```r
+#| echo: true
+#| eval: false
+
+table(
+  Actual = test_data$flop,
+  Predicted = pred_freq
+)
+
+table(
+  Actual = test_data$flop,
+  Predicted = pred_bayes
+)
+```
+
+
+
+
+

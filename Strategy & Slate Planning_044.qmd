@@ -50,6 +50,7 @@ library(brms)
 library(broom.mixed)
 library(rstanarm)
 library (rsample)
+library(performance)
 
 
 movies <- read.csv("data/movies.csv", stringsAsFactors = FALSE)
@@ -1415,6 +1416,8 @@ The posterior probability that franchise films have lower flop odds than Origina
 
 # Part C
 
+The frequentist and Bayesian logistic regression models were evaluated using an 80:20 training–test split, with stratification to maintain a similar proportion of flops in both datasets. Both models used genre, franchise status, log budget and crew size to predict whether a film would flop (ROI < 1).
+
 ```{r}
 library(rsample)
 set.seed(123)
@@ -1429,7 +1432,8 @@ train_data <- training(splitting_data)
 test_data <- testing(splitting_data)
 ```
 
- 
+A classification threshold of 0.30 was selected as a starting point because identifying potential flops is important for greenlight decisions. Films with a predicted flop probability of at least 30% were classified as potential flops. The confusion matrices were used to calculate accuracy, sensitivity, specificity and precision for both models.
+
 ```{r}
 
 model_freq_train <- glm(
@@ -1462,22 +1466,22 @@ prob_freq_train <- predict(
   type = "response"
 )
 
-threshold <- 0.40
+threshold <- 0.30
 
 pred_freq_train <- ifelse(prob_freq_train >= threshold, 1, 0)
 
 conf_train <- table(
   Actual = test_data$flop,
-  Predicted = pred_freq
+  Predicted = pred_freq_train
 )
 
 conf_train
 
 
-Tp <- sum(test_data$flop == 1 & pred_freq == 1)
-Tn <- sum(test_data$flop == 0 & pred_freq == 0)
-Fp <- sum(test_data$flop == 0 & pred_freq == 1)
-Fn <- sum(test_data$flop == 1 & pred_freq == 0)
+Tp <- sum(test_data$flop == 1 & pred_freq_train == 1)
+Tn <- sum(test_data$flop == 0 & pred_freq_train == 0)
+Fp <- sum(test_data$flop == 0 & pred_freq_train == 1)
+Fn <- sum(test_data$flop == 1 & pred_freq_train == 0)
 
 metrics_train_data <- data.frame(
   Accuracy = (Tp + Tn) / (Tp + Tn + Fp + Fn),
@@ -1486,14 +1490,33 @@ metrics_train_data <- data.frame(
   Precision = Tp / (Tp + Fp)
 )
 
-metrics_train_data
+metrics_train_data |>
+  tidyr::pivot_longer(
+    cols = everything(),
+    names_to = "Metric",
+    values_to = "Value"
+  ) |>
+  gt::gt() |>
+  gt::fmt_percent(
+    columns = Value,
+    decimals = 1
+  ) |>
+  gt::cols_label(
+    Metric = "Performance Metric",
+    Value = "Result"
+  ) |>
+  gt::tab_header(
+    title = "Model Performance Metrics",
+    subtitle = "Classification threshold = 0.40"
+  )
 
 ```
-#### Evaluating Bayesian model
+
+Accuracy measures the proportion of correct predictions, sensitivity measures how many actual flops were identified, specificity measures how many non-flops were correctly classified, and precision measures how many predicted flops actually flopped. Comparing these metrics helps assess the models' ability to identify risky films while avoiding false alarms.
 
 ```{r}
 prob_bayes <- posterior_epred(
-  model_bayes,
+  model_bayes_train,
   newdata = test_data
 ) |>
   colMeans()
@@ -1501,20 +1524,25 @@ prob_bayes <- posterior_epred(
 pred_bayes <- ifelse(prob_bayes >= threshold, 1, 0)
 
 bayes_confusion <- table(
-  Actual = test_data$flop,
-  Predicted = pred_bayes
-)|> 
-  as.data.frame() |>
-    mutate(
-    Actual = ifelse(Actual == 0, "Non-flop", "Flop"),
-    Predicted = ifelse(Predicted == 0, "Non-flop", "Flop")
-  ) |>
-  tidyr::pivot_wider(
-    names_from = Predicted,
-    values_from = Freq
+  Actual = factor(
+    test_data$flop,
+    levels = c(0, 1),
+    labels = c("Non-flop", "Flop")
+  ),
+  Predicted = factor(
+    pred_bayes,
+    levels = c(0, 1),
+    labels = c("Non-flop", "Flop")
   )
+)
 
 bayes_confusion |>
+  as.data.frame() |>
+  tidyr::pivot_wider(
+    names_from = Predicted,
+    values_from = Freq,
+    values_fill = 0
+  ) |>
   gt() |>
   cols_label(
     Actual = "Actual Outcome",
@@ -1526,19 +1554,11 @@ bayes_confusion |>
     subtitle = "Classification threshold = 0.30"
   )
 
-library(loo)
 
-
-
-loo_bayes <- loo(model_bayes)
-plot(loo_bayes)
-print(loo_bayes)
 
 ```
 
-
-
-
+The threshold involves a trade-off: lowering it may identify more flops but increase false positives, while raising it may improve specificity but miss more flops. Therefore, the 0.30 threshold should be assessed against the resulting test-set metrics. Neither model should be used alone to make greenlight decisions, as predictions are uncertain and depend on historical data and the selected predictors.
 
 
 # Appendix
@@ -1548,9 +1568,9 @@ print(loo_bayes)
 This appendix documents the allocation of tasks, group meetings, individual contributions and cross-review process undertaken to complete the assignment. It provides evidence of collaboration and quality assurance throughout the project.
 
 ::: {.callout-note appearance="minimal"}
-**Group number:** [Enter group number]
+**Group number:** Group 044
 
-**Group members:** [Member 1], [Member 2], [Member 3], [Member 4]
+**Group members:** Somya Verma, Shravani Jhadhav, Urvi Joshi
 
 **Link to Collaboration:** [Access the group's Teams page](https://tinyurl.com/p49s2bnh), [Git Hub Repo](https://github.com/somya090997/Assignment_2_StatsThinking)
 :::
@@ -1713,5 +1733,134 @@ bayesian_model <- rstanarm::stan_glm(
   chains = 4, iter = 4000, seed = 123, refresh = 500
 )
 ```
+
+## F
+
+
+
+The data were divided into training and test sets using an 80:20 stratified split, maintaining a similar proportion of flops in each set.
+
+```r
+#| echo: true
+#| eval: false
+
+set.seed(123)
+
+splitting_data <- initial_split(
+  movies_model2,
+  prop = 0.8,
+  strata = flop
+)
+
+train_data <- training(splitting_data)
+test_data <- testing(splitting_data)
+```
+
+## G Frequentist logistic regression
+
+```r
+#| echo: true
+#| eval: false
+
+model_freq_train <- glm(
+  flop ~ primary_genre + franchise_status +
+    log_budget + crew_size,
+  data = train_data,
+  family = binomial(link = "logit")
+)
+```
+
+## H Bayesian logistic regression
+
+```r
+#| echo: true
+#| eval: false
+
+model_bayes_train <- rstanarm::stan_glm(
+  flop ~ primary_genre + franchise_status +
+    log_budget + crew_size,
+  data = train_data,
+  family = binomial(link = "logit"),
+  prior = normal(0, 2.5, autoscale = FALSE),
+  prior_intercept = normal(0, 2.5, autoscale = FALSE),
+  chains = 4,
+  iter = 4000,
+  seed = 123,
+  refresh = 500
+)
+```
+
+## G Classification threshold and predictions
+
+A threshold of 0.30 was used to classify films with a predicted flop probability of at least 30% as potential flops.
+
+```r
+#| echo: true
+#| eval: false
+
+threshold <- 0.30
+
+prob_freq <- predict(
+  model_freq_train,
+  newdata = test_data,
+  type = "response"
+)
+
+prob_bayes <- colMeans(
+  rstanarm::posterior_epred(
+    model_bayes_train,
+    newdata = test_data
+  )
+)
+
+pred_freq <- ifelse(prob_freq >= threshold, 1, 0)
+pred_bayes <- ifelse(prob_bayes >= threshold, 1, 0)
+```
+
+## H Model performance metrics
+
+```r
+#| echo: true
+#| eval: false
+
+calculate_metrics <- function(actual, predicted) {
+  TP <- sum(actual == 1 & predicted == 1)
+  TN <- sum(actual == 0 & predicted == 0)
+  FP <- sum(actual == 0 & predicted == 1)
+  FN <- sum(actual == 1 & predicted == 0)
+
+  data.frame(
+    Accuracy = (TP + TN) / (TP + TN + FP + FN),
+    Sensitivity = TP / (TP + FN),
+    Specificity = TN / (TN + FP),
+    Precision = TP / (TP + FP)
+  )
+}
+
+metrics_comparison <- dplyr::bind_rows(
+  Frequentist = calculate_metrics(test_data$flop, pred_freq),
+  Bayesian = calculate_metrics(test_data$flop, pred_bayes),
+  .id = "Model"
+)
+```
+
+## I Confusion matrices
+
+```r
+#| echo: true
+#| eval: false
+
+table(
+  Actual = test_data$flop,
+  Predicted = pred_freq
+)
+
+table(
+  Actual = test_data$flop,
+  Predicted = pred_bayes
+)
+```
+
+
 
 
