@@ -1413,6 +1413,129 @@ The posterior probability that franchise films have lower flop odds than Origina
 **Note: Metropolis sampling was not implemented manually because `rstanarm` uses `Stan's HMC/NUTS` algorithms. Overall, both models produced consistent conclusions.**
 
 
+# Part C
+
+```{r}
+library(rsample)
+set.seed(123)
+
+splitting_data <- initial_split(
+  movies_model2,
+  prop = 0.8,
+  strata = flop
+)
+
+train_data <- training(splitting_data)
+test_data <- testing(splitting_data)
+```
+
+ 
+```{r}
+
+model_freq_train <- glm(
+  flop ~ primary_genre +
+    franchise_status +
+    log_budget +
+    crew_size,
+  data = train_data,
+  family = binomial(link = "logit")
+)
+
+model_bayes_train <- stan_glm(
+  flop ~ primary_genre +
+    franchise_status +
+    log_budget +
+    crew_size,
+  data = train_data,
+  family = binomial(link = "logit"),
+  prior = normal(0, 2.5, autoscale = FALSE),
+  prior_intercept = normal(0, 2.5, autoscale = FALSE),
+  chains = 4,
+  iter = 4000,
+  seed = 123,
+  refresh = 500
+)
+
+prob_freq_train <- predict(
+  model_freq_train,
+  newdata = test_data,
+  type = "response"
+)
+
+threshold <- 0.40
+
+pred_freq_train <- ifelse(prob_freq_train >= threshold, 1, 0)
+
+conf_train <- table(
+  Actual = test_data$flop,
+  Predicted = pred_freq
+)
+
+conf_train
+
+
+Tp <- sum(test_data$flop == 1 & pred_freq == 1)
+Tn <- sum(test_data$flop == 0 & pred_freq == 0)
+Fp <- sum(test_data$flop == 0 & pred_freq == 1)
+Fn <- sum(test_data$flop == 1 & pred_freq == 0)
+
+metrics_train_data <- data.frame(
+  Accuracy = (Tp + Tn) / (Tp + Tn + Fp + Fn),
+  Sensitivity = Tp / (Tp + Fn),
+  Specificity = Tn / (Tn + Fn),
+  Precision = Tp / (Tp + Fp)
+)
+
+metrics_train_data
+
+```
+#### Evaluating Bayesian model
+
+```{r}
+prob_bayes <- posterior_epred(
+  model_bayes,
+  newdata = test_data
+) |>
+  colMeans()
+
+pred_bayes <- ifelse(prob_bayes >= threshold, 1, 0)
+
+bayes_confusion <- table(
+  Actual = test_data$flop,
+  Predicted = pred_bayes
+)|> 
+  as.data.frame() |>
+    mutate(
+    Actual = ifelse(Actual == 0, "Non-flop", "Flop"),
+    Predicted = ifelse(Predicted == 0, "Non-flop", "Flop")
+  ) |>
+  tidyr::pivot_wider(
+    names_from = Predicted,
+    values_from = Freq
+  )
+
+bayes_confusion |>
+  gt() |>
+  cols_label(
+    Actual = "Actual Outcome",
+    `Non-flop` = "Predicted Non-flop",
+    Flop = "Predicted Flop"
+  ) |>
+  tab_header(
+    title = "Bayesian Model Confusion Matrix",
+    subtitle = "Classification threshold = 0.30"
+  )
+
+library(loo)
+
+
+
+loo_bayes <- loo(model_bayes)
+plot(loo_bayes)
+print(loo_bayes)
+
+```
+
 
 
 
