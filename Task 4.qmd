@@ -17,6 +17,7 @@ library(tidyverse)
 library(broom)
 library(brms)
 library(broom.mixed)
+library(gt)
 
 movies <- read.csv("data/movies.csv", stringsAsFactors = FALSE)
 
@@ -283,37 +284,60 @@ mean(draws[, "franchise_statusFranchise"] < 0)
 #| warning: false
 library(gt)
 
-# Predicted flop probability for each film from the frequentist model
+# Predicted probability of a flop for each film
 movies_model2 <- movies_model2 |>
-  mutate(p_flop = predict(model_freq, type = "response"))
+  mutate(Prob = predict(model_freq, type = "response"))
 
-# Confusion matrix measures at a given threshold
-conf_measures <- function(threshold) {
-  pred <- if_else(movies_model2$p_flop >= threshold, 1, 0)
-  tp <- sum(pred == 1 & movies_model2$flop == 1)
-  fp <- sum(pred == 1 & movies_model2$flop == 0)
-  fn <- sum(pred == 0 & movies_model2$flop == 1)
-  tn <- sum(pred == 0 & movies_model2$flop == 0)
-  tibble(
-    threshold   = threshold,
-    tp = tp, fp = fp, fn = fn, tn = tn,
-    accuracy    = (tp + tn) / (tp + fp + fn + tn),
-    sensitivity = tp / (tp + fn),
-    specificity = tn / (tn + fp),
-    precision   = tp / (tp + fp)
+# Helper functions (from the Week 11 tutorial, labels changed to Flop / Not flop)
+conf_mat <- function(actual, prob, threshold = 0.5) {
+  table(
+    Predicted = factor(ifelse(prob > threshold, "Flop", "Not flop"), levels = c("Not flop", "Flop")),
+    Actual    = factor(ifelse(actual == 1, "Flop", "Not flop"), levels = c("Not flop", "Flop"))
   )
 }
 
-# Try thresholds from 0.05 to 0.50 and pick the one that best balances
-# sensitivity and specificity
-thresholds <- map_dfr(seq(0.05, 0.50, by = 0.01), conf_measures) |>
-  mutate(youden = sensitivity + specificity - 1)
+class_metrics <- function(cm) {
+  TP <- cm["Flop", "Flop"]; TN <- cm["Not flop", "Not flop"]
+  FP <- cm["Flop", "Not flop"]; FN <- cm["Not flop", "Flop"]
+  data.frame(
+    Accuracy    = (TP + TN) / sum(cm),
+    Sensitivity = TP / (TP + FN),
+    Specificity = TN / (TN + FP),
+    Precision   = TP / (TP + FP)
+  )
+}
 
-best_threshold <- thresholds |>
-  slice_max(youden, n = 1) |>
-  pull(threshold)
-
+# Overall flop rate and the baseline (always predicting the more common result)
 flop_rate <- mean(movies_model2$flop)
+baseline  <- max(flop_rate, 1 - flop_rate)
 ```
 
-Flops are the minority outcome, about 25% of films
+A film is predicted to flop when its predicted probability is above the threshold. The usual threshold is 0.5, but flops are the minority outcome, about 25% of films, so @tbl-t4-metrics compares 0.5 with the overall flop rate as the threshold. The baseline, always predicting "not a flop", would be correct about 75% of the time.
+
+```{r}
+#| label: tbl-t4-metrics
+#| tbl-cap: "Model performance at a threshold of 0.5 and at the overall flop rate"
+bind_rows(
+  class_metrics(conf_mat(movies_model2$flop, movies_model2$Prob, 0.5)) |>
+    mutate(Threshold = "0.5 (usual)", Cutoff = 0.5),
+  class_metrics(conf_mat(movies_model2$flop, movies_model2$Prob, flop_rate)) |>
+    mutate(Threshold = "Flop rate (chosen)", Cutoff = flop_rate)
+) |>
+  mutate(across(where(is.numeric), ~ if_else(is.nan(.x), NA_real_, .x))) |>
+  select(Threshold, Cutoff, Accuracy, Sensitivity, Specificity, Precision) |>
+  gt() |>
+  fmt_number(columns = c(Cutoff, Accuracy, Sensitivity, Specificity, Precision), decimals = 3) |>
+  sub_missing(missing_text = "-")
+```
+
+```{r}
+#| label: tbl-t4-confusion
+#| tbl-cap: "Confusion matrix at the chosen threshold (overall flop rate)"
+conf_mat(movies_model2$flop, movies_model2$Prob, flop_rate) |>
+  as.data.frame.matrix() |>
+  gt(rownames_to_stub = TRUE)
+```
+
+**Choice of threshold :** With the usual threshold of 0.5, the model fails to predict any flop, since it assigns no movie a probability above 0.43. It is about 75% accurate, which is similar to the accuracy of the baseline, however, it fails to capture any of the true positives (sensitivity of 0), and the precision cannot be computed as well, since there are no predicted flops (@tbl-t4-metrics). Therefore, accuracy is not a reliable metric, if one of the outcomes is significantly less common than another. We set the threshold to the overall flop rate (around 0.25), so that a movie is detected, if the model predicts it as a flop more likely than a regular movie. We believe that the cost of overlooking a flop (losing money on production) is greater than the cost of raising a false alarm (a pitch evaluation).
+
+**Results at the chosen threshold.** This classification model has accuracy of about 54%, sensitivity of about 76%, specificity of about 47% and precision of about 33% (@tbl-t4-metrics, @tbl-t4-confusion). The model detects about 3 out of 4 films that really flopped, but at the same time it marks about half of the films that have not. Out of all marked films about 1 out of 3 really flops, which is better than the base rate of 25% but still means that most of the marked films do not flop and thus recover the cost of production. Accuracy is worse than the baseline but this measure is irrelevant for this problem since the baseline never marks any flop. This is the same data as used to fit the classification model, so these values may be slightly overoptimistic.
