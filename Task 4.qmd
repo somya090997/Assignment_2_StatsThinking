@@ -5,7 +5,7 @@ format: html
 editor: visual
 ---
 
-#### Part A – Defining the outcome and justifying the model
+## Part A – Defining the outcome and justifying the model
 
 A film is defined as a **flop** if it fails to recoup its production budget at the box office, i.e. ROI \< 1. This is created as a binary variable: 1 = flop, 0 = not a flop.
 
@@ -71,8 +71,7 @@ We are using logistic regression because we want to predict whether a film will 
 
 Logistic regression is a better fit because it predicts the probability of a film flopping, with values always between 0 and 1. It also helps us understand how different factors influence the chances of a flop. For example, we can compare franchise films with original films while keeping genre and budget constant. This gives the Head of Production useful insights to make more informed decisions about which films to greenlight.
 
-
-# Trying another method
+## Part B - Trying another method
 
 ```{r}
 # Check available columns
@@ -138,7 +137,6 @@ movies_model2 |>
   )
 ```
 
-
 Action was selected as the reference genre because its downside risk was examined in the earlier analysis.
 
 ```{r}
@@ -165,6 +163,7 @@ model_freq <- glm(
 exp(coef(model_freq))
 exp(confint(model_freq))
 ```
+
 ```{r}
 results <- broom::tidy(
   model_freq,
@@ -199,7 +198,6 @@ results |>
 
 ```
 
-
 ```{r}
 
 install.packages("rstanarm")
@@ -224,6 +222,7 @@ bayesian_model <- stan_glm(
 print(bayesian_model, digits = 3)
 
 ```
+
 ```{r}
 #checking odd ratio for Bayesian
 posterior_draws <- as.matrix(bayesian_model)
@@ -276,4 +275,45 @@ draws <- as.matrix(bayesian_model)
 mean(draws[, "franchise_statusFranchise"] < 0)
 ```
 
+## Part C – Model fit: confusion matrix
 
+```{r}
+#| label: t4-confusion-setup
+#| message: false
+#| warning: false
+library(gt)
+
+# Predicted flop probability for each film from the frequentist model
+movies_model2 <- movies_model2 |>
+  mutate(p_flop = predict(model_freq, type = "response"))
+
+# Confusion matrix measures at a given threshold
+conf_measures <- function(threshold) {
+  pred <- if_else(movies_model2$p_flop >= threshold, 1, 0)
+  tp <- sum(pred == 1 & movies_model2$flop == 1)
+  fp <- sum(pred == 1 & movies_model2$flop == 0)
+  fn <- sum(pred == 0 & movies_model2$flop == 1)
+  tn <- sum(pred == 0 & movies_model2$flop == 0)
+  tibble(
+    threshold   = threshold,
+    tp = tp, fp = fp, fn = fn, tn = tn,
+    accuracy    = (tp + tn) / (tp + fp + fn + tn),
+    sensitivity = tp / (tp + fn),
+    specificity = tn / (tn + fp),
+    precision   = tp / (tp + fp)
+  )
+}
+
+# Try thresholds from 0.05 to 0.50 and pick the one that best balances
+# sensitivity and specificity
+thresholds <- map_dfr(seq(0.05, 0.50, by = 0.01), conf_measures) |>
+  mutate(youden = sensitivity + specificity - 1)
+
+best_threshold <- thresholds |>
+  slice_max(youden, n = 1) |>
+  pull(threshold)
+
+flop_rate <- mean(movies_model2$flop)
+```
+
+Flops are the minority outcome, about 25% of films
