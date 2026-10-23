@@ -12,6 +12,7 @@ editor: visual
 #| message: false
 #| warning: false
 library(tidyverse)
+library(gt)
 set.seed(24252678)
 
 # Same cleaning as Task 1: placeholders become NA and all rows are kept
@@ -45,11 +46,17 @@ movies |>
     missing_budget = sum(is.na(budget)),
     pct_missing = round(100 * mean(is.na(budget)), 1)
   ) |>
-  knitr::kable(col.names = c("Franchise status", "Films", "Usable budget", "Missing budget", "% missing"))
+  gt() |>
+  cols_label(
+    franchise_status = "Franchise status",
+    films = "Films",
+    usable_budget = "Usable budget",
+    missing_budget = "Missing budget",
+    pct_missing = "% missing"
+  )
 ```
 
 ### 1. Comparing the budget distributions
-
 
 ```{r}
 
@@ -142,7 +149,12 @@ ci
 #| tbl-cap: "Difference in median budget (Franchise minus Original) with 95% bootstrap interval (USD millions)"
 tibble(observed = obs_diff, lower = ci[1], upper = ci[2]) |>
   mutate(across(everything(), ~ round(.x / 1e6, 1))) |>
-  knitr::kable(col.names = c("Observed difference", "Lower 95%", "Upper 95%"))
+  gt() |>
+  cols_label(
+    observed = "Observed difference",
+    lower = "Lower 95%",
+    upper = "Upper 95%"
+  )
 ```
 
 ```{r}
@@ -177,8 +189,15 @@ t2 |>
     over_100M = mean(budget > 100e6)
   ) |>
   mutate(across(share_of_films:over_100M, ~ round(.x, 3))) |>
-  knitr::kable(col.names = c("Franchise status", "Films", "Share of films", "Share of budget",
-                             "Under $10M", "Over $100M"))
+ gt() |>
+  cols_label(
+    franchise_status = "Franchise status",
+    n_films = "Films",
+    share_of_films = "Share of films",
+    share_of_budget = "Share of budget",
+    under_10M = "Under $10M",
+    over_100M = "Over $100M"
+  )
 ```
 
 ```{r}
@@ -189,7 +208,12 @@ movies |>
   group_by(franchise_status) |>
   summarise(total_revenue = sum(revenue)) |>
   mutate(share_of_revenue = round(total_revenue / sum(total_revenue), 3)) |>
-  knitr::kable(col.names = c("Franchise status", "Total revenue", "Share of revenue"))
+  gt() |>
+  cols_label(
+    franchise_status = "Franchise status",
+    total_revenue = "Total revenue",
+    share_of_revenue = "Share of revenue"
+  )
 ```
 
 Leadership's concern is only partly supported. Franchise films do indeed have larger budget per movie, where 22% of them have a budget higher than \$100M whereas only 6.5% of Originals do that (@tbl-t2-concern). However, Originals are not primarily small movies because 27% of them have budgets less than \$10M. Franchise films represent 6% of films, have 10% of budget (@tbl-t2-concern) and 14% of revenue (@tbl-t2-revenue), so Originals provide most of both expenses and income. It is an observation, so it only reveals budget gap without providing evidence on causation. Moreover, 23% of Originals do not have their budget specified at all compared to 10% of Franchise films (@tbl-t2-missing), so the actual gap may be even larger.
